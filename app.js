@@ -269,7 +269,7 @@
   const isTouch = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
   if (!reduce && !isTouch) {
     window.addEventListener('wheel', (e) => {
-      if (e.ctrlKey || e.metaKey || menuOpen || !live()) return;
+      if (e.ctrlKey || e.metaKey || menuOpen || tourOpen || !live()) return;
       e.preventDefault();
       const se = document.scrollingElement || html;
       sm.anim = null;
@@ -282,6 +282,7 @@
   document.addEventListener('click', (e) => {
     const a = e.target && e.target.closest ? e.target.closest('a[href^="#"]') : null;
     if (!a) return;
+    if (a.getAttribute('href') === '#tur') { e.preventDefault(); setTour(true); return; }
     const id = a.getAttribute('href').slice(1);
     const el = id ? document.getElementById(id) : null;
     if (!el) { if (a.getAttribute('href') === '#') e.preventDefault(); return; }
@@ -290,6 +291,93 @@
     sm.anim = { from: window.scrollY, to: top(el), t0: performance.now(), dur: 1000 };
     if (!sm.run) { sm.run = true; sm.last = 0; requestAnimationFrame(step); }
   });
+
+  /* ---------------- 360° tour: Matterport scan of the club, walked like a game with the keyboard ----------------
+     The scan's own viewer handles the walking (↑/W forward, ↓/S back, ←/→ turn, A/D side step, hold to keep going);
+     this keeps the keyboard inside it, so the real photos are shown at full quality. */
+  const tour = $('.tour'), frame = tour ? $('.tour-frame', tour) : null;
+  const tGo = tour ? $('.tour-go', tour) : null, tFs = tour ? $('.tour-fs', tour) : null;
+  let tourOpen = false, tourReady = false, tourLive = false, tourBack = null;
+  const walkKey = (k) => /^(Arrow(Up|Down|Left|Right)|[wasdWASD])$/.test(k);
+  function tourSync() {
+    if (tour) tour.classList.toggle('away', tourOpen && tourLive && document.activeElement !== frame);
+  }
+  function tourFocus() {
+    if (!frame || !tourLive) return;
+    try { frame.focus({ preventScroll: true }); } catch (err) { frame.focus(); }
+    setTimeout(tourSync, 0);
+  }
+  function tourStart() {
+    if (!tourReady || tourLive) return;
+    tourLive = true;
+    tour.classList.add('live');
+    tourFocus();
+  }
+  function setTour(open) {
+    if (!tour || open === tourOpen) return;
+    tourOpen = open;
+    if (open) {
+      if (menuOpen) setMenu(false);
+      tourBack = document.activeElement;
+      if (!frame.getAttribute('src')) {
+        frame.addEventListener('load', () => setTimeout(() => {
+          tourReady = true;
+          tour.classList.add('ready');
+          if (tGo) { tGo.disabled = false; if (tourOpen && !tourLive) tGo.focus({ preventScroll: true }); }
+        }, 1500), { once: true });
+        frame.setAttribute('src', frame.dataset.src);
+      }
+      tour.removeAttribute('inert');
+      tour.setAttribute('aria-hidden', 'false');
+      tour.classList.add('open');
+      html.classList.add('tour-on');
+      sm.anim = null; sm.run = false;
+      setTimeout(() => {
+        if (tourLive) tourFocus();
+        else (tGo && !tGo.disabled ? tGo : $('.tour-x', tour)).focus({ preventScroll: true });
+      }, 80);
+      if (location.hash !== '#tur') history.replaceState(null, '', '#tur');
+    } else {
+      if (document.fullscreenElement === tour && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+      tour.classList.remove('open');
+      tour.setAttribute('aria-hidden', 'true');
+      tour.setAttribute('inert', '');
+      html.classList.remove('tour-on');
+      if (location.hash === '#tur') history.replaceState(null, '', location.pathname + location.search);
+      window.focus();
+      if (tourBack && tourBack.focus) tourBack.focus({ preventScroll: true });
+    }
+    tourSync();
+  }
+  if (tour) {
+    $('.tour-x', tour).addEventListener('click', () => setTour(false));
+    if (tGo) tGo.addEventListener('click', tourStart);
+    $('.tour-hint', tour).addEventListener('click', tourFocus);
+    if (tFs) {
+      if (!document.fullscreenEnabled || !tour.requestFullscreen) tFs.hidden = true;
+      tFs.addEventListener('click', () => {
+        if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+        else tour.requestFullscreen().catch(() => {});
+      });
+      document.addEventListener('fullscreenchange', () => {
+        const fs = document.fullscreenElement === tour;
+        tFs.setAttribute('aria-pressed', fs ? 'true' : 'false');
+        tFs.setAttribute('aria-label', fs ? 'Tam ekrandan çık' : 'Tam ekran');
+        setTimeout(tourFocus, 60);
+      });
+    }
+    // focus moving into / out of the scan shows or hides the "click to walk" hint
+    window.addEventListener('blur', () => setTimeout(tourSync, 0));
+    window.addEventListener('focus', () => setTimeout(tourSync, 0));
+    document.addEventListener('keydown', (e) => {
+      if (!tourOpen) return;
+      if (e.key === 'Escape') { setTour(false); return; }
+      if (!walkKey(e.key) || e.ctrlKey || e.metaKey || e.altKey) return;
+      e.preventDefault();
+      if (!tourLive) tourStart(); else tourFocus();
+    });
+    if (location.hash === '#tur') setTour(true);
+  }
 
   measure(); tick();
   const ready = () => { measure(); tick(); };
