@@ -371,14 +371,14 @@
   const walkKey = (k) => /^(Arrow(Up|Down|Left|Right)|[wasdqeWASDQE])$/.test(k);
   function loadWalker() {
     if (wkLoading) return wkLoading;
-    wkLoading = import('./tour/walker.js?v=1')
+    wkLoading = import('./tour/walker.js?v=2')
       .then(({ Walker, drawMap }) => {
         const map = $('.tour-map', tour), mctx = map.getContext('2d');
         wk = new Walker(stage, { onFrame: (w) => { if (tourLive) drawMap(mctx, map.width / 180, w); } });
         wk.canvas.addEventListener('focus', tourSync);
         wk.canvas.addEventListener('blur', () => setTimeout(tourSync, 0));
         if (!tourOpen) wk.pause();
-        return wk.load('tour/tour.json?v=1');
+        return wk.load('tour/tour.json?v=2');
       })
       .then(() => {
         tourReady = true;
