@@ -203,9 +203,9 @@ a{color:#D6FB00}a:hover{color:#ffffff}
 .rb.cur{visibility:visible;z-index:7}
 .rb.leave{visibility:visible;z-index:6}
 .rb-row{display:flex;width:max-content}
-.rb.cur .rb-row,.rb.leave .rb-row{animation:rbLoop 12s linear infinite}
+.rb.cur .rb-row,.rb.leave .rb-row{animation:rbLoop var(--rbd,12s) linear var(--rbdl,0s) infinite}
 @keyframes rbLoop{from{transform:translateX(0)}to{transform:translateX(-33.3333%)}}
-.rb.cur.first .rb-row{animation:rbLoop 12s linear infinite,rbSlit .75s var(--p4o) .55s both}
+.rb.cur.first .rb-row{animation:rbLoop var(--rbd,12s) linear var(--rbdl,0s) infinite,rbSlit .75s var(--p4o) .55s both}
 @keyframes rbSlit{from{clip-path:polygon(0 50%,100% 50%,100% 50%,0 50%)}to{clip-path:polygon(0 0,100% 0,100% 100%,0 100%)}}
 .rb.cur.first .rb-in{animation:rbIn .75s var(--p4o) .55s both}
 @keyframes rbIn{from{transform:translateX(45%) scale(1.4)}to{transform:none}}
@@ -230,7 +230,7 @@ a{color:#D6FB00}a:hover{color:#ffffff}
 .bul{position:relative;width:64px;height:44px;border:0;padding:0;background:transparent;cursor:pointer}
 .bul::before{content:"";position:absolute;left:0;right:0;top:50%;height:2px;margin-top:-1px;background:rgba(255,255,255,.3)}
 .bul .fill{position:absolute;left:0;right:0;top:50%;height:2px;margin-top:-1px;background:#ffffff;transform:scaleX(0);transform-origin:left}
-.bul.run .fill{animation:fillBar 10s linear both}
+.bul.run .fill{animation:fillBar var(--fill,10s) linear both}
 .bul.done .fill{animation:unfill .5s var(--p4o) both;transform-origin:right}
 @keyframes fillBar{from{transform:scaleX(0)}to{transform:scaleX(1)}}
 @keyframes unfill{from{transform:scaleX(1)}to{transform:scaleX(0)}}

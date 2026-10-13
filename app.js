@@ -8,66 +8,100 @@
   const cl = (x) => Math.max(0, Math.min(1, x));
 
   /* ---------------- hero: Phive-style ribbon slideshow ---------------- */
+  // Each scene: the band scrolls its title until every letter has been on screen, then it opens onto
+  // the photo/video and the letters start rolling; OPEN_MS later the next scene comes in.
   const bgs = $$('.hero .bg'), cts = $$('.hero .ct'), rbs = $$('.hero .rb'), buls = $$('.hero .bul');
   const hs = { cur: 0, leave: -1, phase: 'band', first: true, run: false, done: -1 };
+  const OPEN_MS = 7500, HOLD_MS = 900;
   let ht = [];
-  const at = (ms, fn) => ht.push(setTimeout(fn, ms));
+  const at = (ms, fn) => ht.push(setTimeout(fn, Math.max(0, ms)));
   const clearAll = () => { ht.forEach(clearTimeout); ht = []; };
+  // band text speed in px/s (the design's 12 s loop is ~200 px/s on a 1440 px screen)
+  const rbSpeed = () => Math.max(130, window.innerWidth * 0.14);
+  // ms the band needs, once moving, until the last letter of its title is fully on screen, plus a beat
+  function readMs(i) {
+    const t = rbs[i] && $('.rb-title', rbs[i]);
+    if (!t || reduce) return 0;
+    const pad = parseFloat(getComputedStyle(t).paddingLeft) || 0;
+    return Math.max(0, t.offsetWidth - (window.innerWidth - pad)) / rbSpeed() * 1000 + HOLD_MS;
+  }
   function heroApply() {
     const state = (i) => i === hs.cur
       ? ' cur' + (hs.phase === 'open' ? ' open' : ' band') + (hs.first ? ' first' : '')
       : (i === hs.leave ? ' leave' : '');
     bgs.forEach((e, i) => { e.className = 'bg' + state(i); });
     cts.forEach((e, i) => { e.className = 'ct' + state(i); });
-    rbs.forEach((e, i) => { e.className = 'rb' + state(i); });
+    rbs.forEach((e, i) => { e.className = 'rb' + state(i); if (i !== hs.cur && i !== hs.leave) flipOff(i); });
     buls.forEach((e, i) => { e.className = 'bul' + (i === hs.cur && hs.run ? ' run' : '') + (i === hs.done ? ' done' : ''); });
   }
   function heroSet(p) { Object.assign(hs, p); heroApply(); }
+  // the band holds still while it slides / closes in, then scrolls from its first letter
+  const stillMs = (first) => (first ? 1300 : 1000);
+  function prepScene(i, first) {
+    flipOff(i);
+    if (rbs[i]) rbs[i].style.setProperty('--rbdl', stillMs(first) / 1000 + 's');
+  }
+  function runScene(i, first) {
+    const runAt = first ? 2000 : 1000, minOpen = first ? 4500 : 3500;
+    at(runAt, () => {
+      const openAt = Math.max(minOpen, stillMs(first) + readMs(i)), nextAt = openAt + OPEN_MS;
+      if (buls[i]) buls[i].style.setProperty('--fill', (nextAt - runAt) / 1000 + 's');
+      heroSet(first ? { run: true } : { leave: -1, run: true, done: -1 });
+      at(openAt - runAt, () => { heroSet({ phase: 'open', first: false }); flipOn(i); });
+      at(nextAt - runAt, () => heroNext());
+    });
+  }
   function heroNext(i) {
     const n = i === undefined ? (hs.cur + 1) % bgs.length : i;
     if (n === hs.cur) return;
     clearAll();
+    prepScene(n, false);
     heroSet({ leave: hs.cur, cur: n, phase: 'band', first: false, run: false, done: hs.cur });
-    at(1000, () => heroSet({ leave: -1, run: true, done: -1 }));
-    at(3500, () => heroSet({ phase: 'open' }));
-    at(11000, () => heroNext());
-  }
-  if (bgs.length) {
-    heroApply();
-    at(2000, () => heroSet({ run: true }));
-    at(4500, () => heroSet({ phase: 'open', first: false }));
-    at(12000, () => heroNext());
-    buls.forEach((b, i) => b.addEventListener('click', () => heroNext(i)));
+    runScene(n, false);
   }
 
-  /* ribbon letters: .first chars squash down while .last chars grow (stagger .1s, expo.inOut 2s, yoyo) */
-  function flip() {
-    if (reduce) return;
-    const ex = 'cubic-bezier(0.87, 0, 0.13, 1)';
-    $$('.rb-title').forEach((t) => {
-      if (t.dataset.flip === '1') return;
+  /* band letters roll once the band has opened: .fa chars squash down while .fb chars grow
+     (stagger .1s, expo.inOut 2s, yoyo) */
+  const flips = new Map();
+  function flipOn(i) {
+    if (reduce || flips.has(i) || !rbs[i]) return;
+    const ex = 'cubic-bezier(0.87, 0, 0.13, 1)', list = [];
+    $$('.rb-title', rbs[i]).forEach((t) => {
       const fa = $$('.fa .c', t), fb = $$('.fb .c', t);
       if (!fa.length || !fa[0].animate) return;
-      t.dataset.flip = '1';
       const vis = [];
-      fa.forEach((el, i) => { if (el.textContent.trim() !== '') vis.push(i); });
+      fa.forEach((el, k) => { if (el.textContent.trim() !== '') vis.push(k); });
       const n = vis.length, T = 2 + (n - 1) * 0.1, D = 2 * T;
       vis.forEach((idx, j) => {
-        const s = 0.1 * j;
-        const k = [s / D, (s + 2) / D, (D - s - 2) / D, (D - s) / D].map((v) => Math.min(1, Math.max(0, v)));
+        const st = 0.1 * j;
+        const k = [st / D, (st + 2) / D, (D - st - 2) / D, (D - st) / D].map((v) => Math.min(1, Math.max(0, v)));
         for (let q = 1; q < 4; q++) k[q] = Math.max(k[q], k[q - 1]);
-        const mk = (a, b) => [
-          { transform: 'scaleY(' + a + ')', offset: 0 },
-          { transform: 'scaleY(' + a + ')', offset: k[0], easing: ex },
-          { transform: 'scaleY(' + b + ')', offset: k[1] },
-          { transform: 'scaleY(' + b + ')', offset: k[2], easing: ex },
-          { transform: 'scaleY(' + a + ')', offset: k[3] },
-          { transform: 'scaleY(' + a + ')', offset: 1 }
+        const mk = (x, y) => [
+          { transform: 'scaleY(' + x + ')', offset: 0 },
+          { transform: 'scaleY(' + x + ')', offset: k[0], easing: ex },
+          { transform: 'scaleY(' + y + ')', offset: k[1] },
+          { transform: 'scaleY(' + y + ')', offset: k[2], easing: ex },
+          { transform: 'scaleY(' + x + ')', offset: k[3] },
+          { transform: 'scaleY(' + x + ')', offset: 1 }
         ];
-        fa[idx].animate(mk(1, 0), { duration: D * 1000, iterations: Infinity });
-        fb[idx].animate(mk(0, 1), { duration: D * 1000, iterations: Infinity });
+        list.push(fa[idx].animate(mk(1, 0), { duration: D * 1000, iterations: Infinity }));
+        list.push(fb[idx].animate(mk(0, 1), { duration: D * 1000, iterations: Infinity }));
       });
     });
+    flips.set(i, list);
+  }
+  function flipOff(i) {
+    const list = flips.get(i);
+    if (!list) return;
+    list.forEach((an) => an.cancel());
+    flips.delete(i);
+  }
+
+  if (bgs.length) {
+    prepScene(0, true);
+    heroApply();
+    runScene(0, true);
+    buls.forEach((b, i) => b.addEventListener('click', () => heroNext(i)));
   }
 
   /* ---------------- sliders: equipment + testimonials ---------------- */
@@ -133,6 +167,11 @@
     const V = window.innerHeight;
     E.V = V;
     html.style.setProperty('--V', V + 'px');
+    const sp = rbSpeed();
+    rbs.forEach((rb) => {
+      const cp = $('.rb-in', rb);
+      if (cp && cp.offsetWidth) rb.style.setProperty('--rbd', (cp.offsetWidth / sp).toFixed(2) + 's');
+    });
     const sv = $('.bd-svg');
     if (sv) {
       let ux = 1000, uy = 560;
@@ -253,7 +292,7 @@
   });
 
   measure(); tick();
-  const ready = () => { measure(); tick(); flip(); };
+  const ready = () => { measure(); tick(); };
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(ready); else window.addEventListener('load', ready);
   window.addEventListener('load', () => { measure(); tick(); });
 })();
