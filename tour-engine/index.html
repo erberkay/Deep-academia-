@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Panorama Yürüyüşü</title>
+<style>
+:root{--lime:#D6FB00}
+html,body{margin:0;height:100%;background:#0b0b0b;color:#fff;font-family:system-ui,sans-serif}
+.wk{position:fixed;inset:0;overflow:hidden}
+.wk-canvas{display:block;width:100%;height:100%;outline:none;cursor:grab;touch-action:none}
+.wk-canvas:active{cursor:grabbing}
+.wk-map{position:absolute;right:16px;top:16px;width:180px;height:180px;border-radius:12px;background:rgba(10,10,10,.55);border:1px solid rgba(255,255,255,.12)}
+.wk-info{position:absolute;left:16px;top:16px;padding:8px 12px;border-radius:8px;background:rgba(10,10,10,.6);font-size:13px;letter-spacing:.08em}
+.wk-pad{position:absolute;left:50%;bottom:20px;transform:translateX(-50%);display:grid;grid-template-columns:repeat(3,52px);grid-template-rows:repeat(2,52px);gap:8px}
+.wk-pad button{width:52px;height:52px;border-radius:10px;border:1.5px solid #3a3a3a;border-bottom-width:3px;background:rgba(20,20,20,.75);color:var(--lime);font-size:20px;cursor:pointer}
+.wk-pad .u{grid-column:2;grid-row:1}.wk-pad .l{grid-column:1;grid-row:2}.wk-pad .d{grid-column:2;grid-row:2}.wk-pad .r{grid-column:3;grid-row:2}
+</style>
+</head>
+<body>
+<div class="wk" id="wk">
+  <canvas class="wk-map" width="360" height="360" aria-hidden="true"></canvas>
+  <div class="wk-info" id="info">yükleniyor…</div>
+  <div class="wk-pad" aria-label="Yön düğmeleri">
+    <button class="u" type="button" data-d="fwd" aria-label="İleri">↑</button>
+    <button class="l" type="button" data-d="turnL" aria-label="Sola dön">←</button>
+    <button class="d" type="button" data-d="back" aria-label="Geri">↓</button>
+    <button class="r" type="button" data-d="turnR" aria-label="Sağa dön">→</button>
+  </div>
+</div>
+<script type="module">
+import { Walker, drawMap } from './walker.js';
+
+// Synthetic test panoramas: a 3 x 4 grid of points 2.5 m apart, each with compass labels and a floor grid,
+// so walking and turning can be checked before the real photos arrive.
+function demoPano(label, w = 2048) {
+  const h = w / 2, c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const g = c.getContext('2d');
+  const sky = g.createLinearGradient(0, 0, 0, h / 2); sky.addColorStop(0, '#1d2a3a'); sky.addColorStop(1, '#3d4f63');
+  g.fillStyle = sky; g.fillRect(0, 0, w, h / 2);
+  const fl = g.createLinearGradient(0, h / 2, 0, h); fl.addColorStop(0, '#3b3026'); fl.addColorStop(1, '#14100c');
+  g.fillStyle = fl; g.fillRect(0, h / 2, w, h / 2);
+  g.strokeStyle = 'rgba(214,251,0,.35)'; g.lineWidth = 2;
+  for (let i = 0; i < 36; i++) { const x = (i / 36) * w; g.beginPath(); g.moveTo(x, h / 2); g.lineTo(x, h); g.stroke(); }
+  for (let j = 1; j < 8; j++) { const y = h / 2 + (h / 2) * (1 - 1 / (1 + j * 0.45)); g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke(); }
+  const dirs = [['KUZEY', 0], ['BATI', Math.PI / 2], ['GÜNEY', Math.PI], ['DOĞU', -Math.PI / 2]];
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  dirs.forEach(([t, th]) => {
+    const u = ((0.5 - th / (2 * Math.PI)) % 1 + 1) % 1;
+    g.fillStyle = '#D6FB00'; g.font = `bold ${w / 26}px system-ui`; g.fillText(t, u * w, h * 0.36);
+    g.fillStyle = '#ffffff'; g.font = `bold ${w / 40}px system-ui`; g.fillText(label, u * w, h * 0.44);
+  });
+  return c;
+}
+const nodes = [];
+for (let r = 0; r < 4; r++) for (let q = 0; q < 3; q++) {
+  const id = 'N' + r + q;
+  nodes.push({ id, canvas: demoPano(id), pos: [q * 2.5, 0, -r * 2.5], heading: 0 });
+}
+
+const root = document.getElementById('wk'), info = document.getElementById('info');
+const map = root.querySelector('.wk-map'), mctx = map.getContext('2d');
+const wk = new Walker(root, {
+  onChange: (n) => { info.textContent = n.id; },
+  onFrame: (w) => drawMap(mctx, 2, w),
+});
+root.insertBefore(wk.canvas, root.firstChild);
+const params = new URLSearchParams(location.search);
+(params.has('data') ? wk.load(params.get('data')) : wk.setData({ start: 'N01', nodes }))
+  .then(() => wk.focus())
+  .catch((e) => { info.textContent = 'Hata: ' + e.message; });
+root.querySelectorAll('.wk-pad button').forEach((b) => {
+  const d = b.dataset.d;
+  b.addEventListener('pointerdown', (e) => { e.preventDefault(); wk.press(d, true); });
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => b.addEventListener(ev, () => wk.press(d, false)));
+});
+window.wk = wk;
+</script>
+</body>
+</html>
