@@ -356,26 +356,46 @@
     if (!sm.run) { sm.run = true; sm.last = 0; requestAnimationFrame(step); }
   });
 
-  /* ---------------- 360° tour: Matterport scan of the club, walked like a game with the keyboard ----------------
-     The scan's own viewer handles the walking (↑/W forward, ↓/S back, ←/→ turn, A/D side step, hold to keep going);
-     this keeps the keyboard inside it, so the real photos are shown at full quality. */
-  const tour = $('.tour'), frame = tour ? $('.tour-frame', tour) : null;
+  /* ---------------- 360° tour: the club's real 360° captures, walked like a game ----------------
+     tour/walker.js shows every capture point's photo cube at full quality and glides from point to point:
+     ↑/W forward (hold to keep walking), ↓/S back, ←/→ turn, A/D side step; drag to look, tap to walk.
+     It runs inside this page, so the keyboard (and Escape) stay with the site. */
+  const tour = $('.tour'), stage = tour ? $('.tour-walk', tour) : null;
   const tGo = tour ? $('.tour-go', tour) : null, tFs = tour ? $('.tour-fs', tour) : null;
   let tourOpen = false, tourReady = false, tourLive = false, tourBack = null, tourPushed = false;
-  const walkKey = (k) => /^(Arrow(Up|Down|Left|Right)|[wasdWASD])$/.test(k);
+  let wk = null, wkLoading = null;
+  const walkKey = (k) => /^(Arrow(Up|Down|Left|Right)|[wasdqeWASDQE])$/.test(k);
+  function loadWalker() {
+    if (wkLoading) return wkLoading;
+    wkLoading = import('./tour/walker.js?v=1')
+      .then(({ Walker, drawMap }) => {
+        const map = $('.tour-map', tour), mctx = map.getContext('2d');
+        wk = new Walker(stage, { onFrame: (w) => { if (tourLive) drawMap(mctx, map.width / 180, w); } });
+        wk.canvas.addEventListener('focus', tourSync);
+        wk.canvas.addEventListener('blur', () => setTimeout(tourSync, 0));
+        if (!tourOpen) wk.pause();
+        return wk.load('tour/tour.json?v=1');
+      })
+      .then(() => {
+        tourReady = true;
+        tour.classList.add('ready');
+        if (tGo) { tGo.disabled = false; if (tourOpen && !tourLive) tGo.focus({ preventScroll: true }); }
+      })
+      .catch(() => tour.classList.add('fail'));
+    return wkLoading;
+  }
   function tourSync() {
-    if (tour) tour.classList.toggle('away', tourOpen && tourLive && document.activeElement !== frame);
+    if (tour) tour.classList.toggle('away', tourOpen && tourLive && !!wk && document.activeElement !== wk.canvas);
   }
   function tourFocus() {
-    if (!frame || !tourLive) return;
-    try { frame.focus({ preventScroll: true }); } catch (err) { frame.focus(); }
+    if (!wk || !tourLive) return;
+    wk.focus();
     setTimeout(tourSync, 0);
   }
   function tourStart() {
     if (!tourReady || tourLive) return;
     tourLive = true;
     tour.classList.add('live');
-    frame.removeAttribute('tabindex');
     tourFocus();
   }
   function setTour(open) {
@@ -384,16 +404,8 @@
     if (open) {
       if (menuOpen) setMenu(false);
       tourBack = document.activeElement;
-      if (!frame.getAttribute('src')) {
-        frame.addEventListener('load', () => setTimeout(() => {
-          tourReady = true;
-          tour.classList.add('ready');
-          if (tGo) { tGo.disabled = false; if (tourOpen && !tourLive) tGo.focus({ preventScroll: true }); }
-        }, 1500), { once: true });
-        frame.setAttribute('src', frame.dataset.src);
-        // no answer from Matterport: say so and offer the tour in a new tab instead of spinning forever
-        setTimeout(() => { if (!tourReady) tour.classList.add('fail'); }, 15000);
-      }
+      loadWalker();
+      if (wk) wk.resume();
       tour.removeAttribute('inert');
       tour.setAttribute('aria-hidden', 'false');
       tour.classList.add('open');
@@ -409,6 +421,7 @@
       if (location.hash !== '#tur') { history.pushState({ tour: 1 }, '', '#tur'); tourPushed = true; }
     } else {
       if (document.fullscreenElement === tour && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+      if (wk) wk.pause();                       // no drawing while hidden
       tour.classList.remove('open');
       tour.setAttribute('aria-hidden', 'true');
       tour.setAttribute('inert', '');
@@ -419,7 +432,6 @@
         else history.replaceState(null, '', location.pathname + location.search);
       }
       tourPushed = false;
-      window.focus();
       if (tourBack && tourBack.focus) tourBack.focus({ preventScroll: true });
     }
     tourSync();
@@ -428,6 +440,14 @@
     $('.tour-x', tour).addEventListener('click', () => setTour(false));
     if (tGo) tGo.addEventListener('click', tourStart);
     $('.tour-hint', tour).addEventListener('click', tourFocus);
+    // touch arrows: press and hold to keep walking / turning
+    $$('.tour-dpad button', tour).forEach((btn) => {
+      const d = btn.dataset.d;
+      const on = (e) => { e.preventDefault(); if (wk && tourLive) wk.press(d, true); };
+      const off = () => { if (wk) wk.press(d, false); };
+      btn.addEventListener('pointerdown', on);
+      ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => btn.addEventListener(ev, off));
+    });
     if (tFs) {
       if (!document.fullscreenEnabled || !tour.requestFullscreen) tFs.hidden = true;
       tFs.addEventListener('click', () => {
@@ -441,15 +461,16 @@
         setTimeout(tourFocus, 60);
       });
     }
-    // focus moving into / out of the scan shows or hides the "click to walk" hint
-    window.addEventListener('blur', () => setTimeout(tourSync, 0));
-    window.addEventListener('focus', () => setTimeout(tourSync, 0));
     document.addEventListener('keydown', (e) => {
       if (!tourOpen) return;
       if (e.key === 'Escape') { setTour(false); return; }
       if (!walkKey(e.key) || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (wk && document.activeElement === wk.canvas) return;   // the walker handles it
       e.preventDefault();
-      if (!tourLive) tourStart(); else tourFocus();
+      if (!tourLive) { tourStart(); return; }
+      // focus was elsewhere (e.g. a toolbar button): hand this key straight to the walker too
+      tourFocus();
+      if (wk) wk.onKey(e);
     });
     if (location.hash === '#tur') setTour(true);
     window.addEventListener('hashchange', () => setTour(location.hash === '#tur'));
