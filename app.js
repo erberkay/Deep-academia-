@@ -247,6 +247,7 @@
       G.club = { t: top(elClub), h: elClub.offsetHeight, an: an ? top(an) : null, pw: pw ? { t: top(pw), h: pw.offsetHeight } : null };
     }
     if (elBold) G.bold = { t: top(elBold) };
+    dalSize();
     if (elCls) {
       const t = top(elCls), h = elCls.offsetHeight, grid = $('.cls-grid', elCls);
       G.cls = { t, h, gb: grid ? top(grid) + grid.offsetHeight : t + h, cards: $$('.cc', elCls).map(top) };
@@ -254,6 +255,62 @@
     const ig = $('.ig-grid');
     G.ig = ig ? top(ig) : null;
     G.ints = $$('[data-int]').map((s) => { const t = top(s); return { t, b: t + s.offsetHeight, bold: s.classList.contains('bold') }; });
+  }
+  /* DERİNLERE DAL: the lime sheet with "DAL" cut out, drawn on a canvas. As an SVG mask whose text slides and
+     whose layer zooms 80x, phones had to re-rasterize the whole screen on the CPU every frame (heavy stutter);
+     the canvas fills one rectangle and three letters, and only when the values change. The SVG stays as the
+     fallback (no canvas, reduced motion). */
+  const dal = { cv: null, ctx: null, ok: false, r: 1, ly: NaN, lz: NaN };
+  const DAL_FONT = '600px Anton, Kanit, sans-serif';
+  function dalSetup() {
+    const wrap = $('.bd-maskwrap');
+    if (!wrap || dal.cv) return;
+    const cv = document.createElement('canvas');
+    const ctx = cv.getContext && cv.getContext('2d');
+    if (!ctx) return;
+    cv.className = 'bd-cv';
+    cv.setAttribute('aria-hidden', 'true');
+    wrap.appendChild(cv);
+    dal.cv = cv; dal.ctx = ctx;
+    dal.lime = (getComputedStyle(html).getPropertyValue('--lime') || '#D6FB00').trim() || '#D6FB00';
+    const go = () => { dal.ok = true; dalSize(); wrap.classList.add('cv'); tick(); };
+    if (document.fonts && document.fonts.load) document.fonts.load(DAL_FONT).then(go, go); else go();
+  }
+  function dalSize() {
+    if (!dal.cv) return;
+    const W = dal.cv.parentElement.clientWidth, H = dal.cv.parentElement.clientHeight;
+    if (!W || !H) return;
+    dal.r = Math.min(window.devicePixelRatio || 1, 2);
+    dal.cv.width = Math.round(W * dal.r); dal.cv.height = Math.round(H * dal.r);
+    // the word laid out exactly like the SVG: viewBox 1440x900 "meet", centred, baseline 760, letter-spacing 10
+    const k = Math.min(W / 1440, H / 900), c = dal.ctx;
+    c.font = DAL_FONT;
+    const ws = ['D', 'A', 'L'].map((ch) => c.measureText(ch).width);
+    let x = 720 - (ws[0] + ws[1] + ws[2] + 30) / 2;
+    dal.glyphs = ws.map((w, i) => { const g = { ch: 'DAL'[i], x }; x += w + 10; return g; });
+    const m = c.measureText('L');
+    const asc = m.fontBoundingBoxAscent || 600 * 0.9, desc = m.fontBoundingBoxDescent || 600 * 0.25;
+    dal.k = k; dal.ox = (W - 1440 * k) / 2; dal.oy = (H - 900 * k) / 2;
+    // we dive into the L's stem (same point the SVG zoom used)
+    dal.O = { x: dal.ox + (dal.glyphs[2].x + ws[2] * 0.32) * k, y: dal.oy + (760 - asc + (asc + desc) * 0.55) * k };
+    dal.ly = NaN;
+  }
+  function dalDraw(dly, mz) {
+    if (!dal.ok || !dal.O || (dly === dal.ly && mz === dal.lz)) return;
+    dal.ly = dly; dal.lz = mz;
+    const c = dal.ctx, r = dal.r, O = dal.O, s = r * mz * dal.k;
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.globalCompositeOperation = 'source-over';
+    c.fillStyle = dal.lime;
+    c.fillRect(0, 0, dal.cv.width, dal.cv.height);
+    c.globalCompositeOperation = 'destination-out';
+    // screen = O + mz * (svgLayout - O)
+    c.setTransform(s, 0, 0, s, r * (O.x * (1 - mz) + mz * dal.ox), r * (O.y * (1 - mz) + mz * dal.oy));
+    c.font = DAL_FONT;
+    c.textBaseline = 'alphabetic';
+    c.fillStyle = '#000000';
+    dal.glyphs.forEach((g) => c.fillText(g.ch, g.x, 760 + dly));
+    c.globalCompositeOperation = 'source-over';
   }
   function tick() {
     const V = E.V, y = window.scrollY;
@@ -290,6 +347,7 @@
       set(elBold, '--d1o', 1 - cl((bd - 1.3) / 0.4));
       set(elBold, '--mz', 1 + 79 * a2 * a2 * a2);
       set(elBold, '--dz', a2);
+      dalDraw(700 * (1 - e1), 1 + 79 * a2 * a2 * a2);
       E.mdNow = a2 > 0.6 ? 1 : 0;
     }
     const K = G.cls;
@@ -337,7 +395,7 @@
   const isTouch = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
   if (!reduce && !isTouch) {
     window.addEventListener('wheel', (e) => {
-      if (e.ctrlKey || e.metaKey || menuOpen || tourOpen || !live()) return;
+      if (e.ctrlKey || e.metaKey || menuOpen || tourOpen || ovlOpen() || !live()) return;
       e.preventDefault();
       const se = document.scrollingElement || html;
       sm.anim = null;
@@ -347,17 +405,30 @@
       if (!sm.run) { sm.run = true; sm.last = 0; requestAnimationFrame(step); }
     }, { passive: false });
   }
-  document.addEventListener('click', (e) => {
-    const a = e.target && e.target.closest ? e.target.closest('a[href^="#"]') : null;
-    if (!a) return;
-    if (a.getAttribute('href') === '#tur') { e.preventDefault(); setTour(true); return; }
-    const id = a.getAttribute('href').slice(1);
-    const el = id ? document.getElementById(id) : null;
-    if (!el) { if (a.getAttribute('href') === '#') e.preventDefault(); return; }
-    e.preventDefault();
+  function scrollToEl(el) {
     if (reduce) { window.scrollTo(0, top(el)); return; }
     sm.anim = { from: window.scrollY, to: top(el), t0: performance.now(), dur: 1000 };
     if (!sm.run) { sm.run = true; sm.last = 0; requestAnimationFrame(step); }
+  }
+  document.addEventListener('click', (e) => {
+    const a = e.target && e.target.closest ? e.target.closest('a[href^="#"]') : null;
+    if (!a) return;
+    const href = a.getAttribute('href');
+    if (href === '#tur') { e.preventDefault(); setTour(true); return; }
+    if (isPanelRoute(href)) { e.preventDefault(); openRoute(href); return; }
+    const id = href.slice(1);
+    const el = id ? document.getElementById(id) : null;
+    if (!el) { if (href === '#') e.preventDefault(); return; }
+    e.preventDefault();
+    if (ovlOpen()) {
+      closePanels(() => {
+        scrollToEl(el);
+        if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '-1');
+        el.focus({ preventScroll: true });
+      });
+      return;
+    }
+    scrollToEl(el);
   });
 
   /* ---------------- 360° tour: the club's real 360° captures, walked like a game ----------------
@@ -430,7 +501,7 @@
       tour.setAttribute('aria-hidden', 'true');
       tour.setAttribute('inert', '');
       html.classList.remove('tour-on');
-      [...tour.parentElement.children].forEach((el) => { if (el !== tour) el.inert = false; });
+      [...tour.parentElement.children].forEach((el) => { if (el !== tour) el.inert = el.classList.contains('ovl') && !el.classList.contains('open'); });
       if (location.hash === '#tur') {
         if (tourPushed) history.back();
         else history.replaceState(null, '', location.pathname + location.search);
@@ -480,7 +551,227 @@
     window.addEventListener('hashchange', () => setTour(location.hash === '#tur'));
   }
 
-  measure(); tick();
+  /* ---------------- weekly timetable (#program) and class details (#ders-<slug>) ----------------
+     Full-screen panels filled from data/program.json (taken from deepacademia.com.tr). Each one opens with its
+     own history entry, so the phone's Back button, Escape and ✕ all close it; a class opened from the
+     timetable goes back to the timetable. */
+  const cal = document.getElementById('program'), dz = document.getElementById('ders');
+  const DAYS = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar'];
+  const SHORT = ['PZT', 'SAL', 'ÇAR', 'PER', 'CUM', 'CMT', 'PAZ'];
+  const PALETTE = ['#D6FB00', '#FF7A1A', '#3EE0FF', '#FF4FA3', '#A57CFF', '#FFD23F', '#4BE38A', '#FF5A5A'];
+  let prog = null, progLoading = null, afterClose = null, skipRestore = false, calFilter = 'all', calDay = -1;
+  // who opened each panel (one per open panel), so closing one puts focus back where the user was
+  const openers = [];
+  const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const isOpen = (el) => !!el && el.classList.contains('open');
+  function ovlOpen() { return isOpen(cal) || isOpen(dz); }
+  function isPanelRoute(h) { return h === '#program' || /^#ders-[a-z0-9-]+$/.test(h || ''); }
+  const todayIdx = () => (new Date().getDay() + 6) % 7;
+  const colorOf = (slug) => {
+    const i = prog && prog.order ? prog.order.indexOf(slug) : -1;
+    return PALETTE[(i < 0 ? PALETTE.length - 1 : i) % PALETTE.length];
+  };
+  // a session can belong to more than one class (e.g. "Step & Fat Burn")
+  const slugsOf = (s) => s.slugs || (s.slug ? [s.slug] : []);
+  const byTime = (a, b) => DAYS.indexOf(a.day) - DAYS.indexOf(b.day) || a.start.localeCompare(b.start);
+  const timeOf = (s) => esc(s.start) + (s.end ? ' – ' + esc(s.end) : '');
+  const ARR = '<svg class="arr" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"></path></svg>';
+
+  function ensureData() {
+    if (progLoading) return progLoading;
+    progLoading = fetch('data/program.json?v=1')
+      .then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.json(); })
+      .then((d) => { prog = d; renderTeaser(); renderCal(); if (isOpen(dz)) renderClass(dz.dataset.slug); })
+      .catch(() => { [cal, dz].forEach((el) => el && el.classList.add('fail')); });
+    return progLoading;
+  }
+
+  // the weekly teaser on the page: written into the HTML for first paint, refreshed here from the same data
+  function renderTeaser() {
+    const g = $('#takvim .sched-grid');
+    if (!g || !prog) return;
+    g.innerHTML = DAYS.map((d) => {
+      const list = prog.sessions.filter((s) => s.day === d).sort(byTime);
+      return list.length ? '<div class="day"><span class="dn">' + d + '</span>' + list.map((s) => '<span class="dl"><span class="dt">' + esc(s.start) + '</span><span class="dc">' + esc(s.name) + '</span></span>').join('') + '</div>' : '';
+    }).join('');
+  }
+  function renderCal() {
+    if (!prog || !cal || cal.dataset.done) return;
+    cal.dataset.done = '1';
+    const days = DAYS.map((d, i) => ({ d, i, list: prog.sessions.filter((s) => s.day === d).sort(byTime) })).filter((x) => x.list.length);
+    const slugs = (prog.order || []).filter((sl) => prog.sessions.some((s) => slugsOf(s).includes(sl)));
+    prog.sessions.forEach((s) => slugsOf(s).forEach((sl) => { if (!slugs.includes(sl)) slugs.push(sl); }));
+    const nameOf = (sl) => (prog.classes[sl] && prog.classes[sl].title) || sl;
+    const t = todayIdx();
+    calDay = days.some((x) => x.i === t) ? t : (days.find((x) => x.i > t) || days[0] || { i: -1 }).i;
+    const ses = (s) => {
+      const inner = '<span class="ses-t">' + timeOf(s) + '</span><span class="ses-n" lang="en">' + esc(s.name) + '</span>' +
+        ((s.trainer || s.place) ? '<span class="ses-m">' + esc([s.trainer, s.place].filter(Boolean).join(' · ')) + '</span>' : '');
+      const own = slugsOf(s), main = (s.link && prog.classes[s.link]) ? s.link : own.find((sl) => prog.classes[sl]);
+      const st = ' style="--c:' + colorOf(own[0]) + '" data-slugs="' + esc(own.join(' ')) + '"';
+      return main
+        ? '<a class="ses" href="#ders-' + esc(main) + '"' + st + ' aria-label="' + esc(s.day + ' ' + s.start + ', ' + s.name + ': ders içeriği') + '">' + inner + '</a>'
+        : '<div class="ses"' + st + '>' + inner + '</div>';
+    };
+    $('.ovl-in', cal).innerHTML =
+      '<div class="cal-head"><div><div class="ovl-eyebrow">HAFTALIK GRUP DERSLERİ</div><h2 class="ovl-h" id="cal-h" tabindex="-1">DERS PROGRAMI</h2></div>' +
+      (prog.intro ? '<p class="cal-lead">' + esc(prog.intro) + '</p>' : '') + '</div>' +
+      '<div class="cal-filters" role="group" aria-label="Derse göre süz"><button class="chip" type="button" data-f="all" aria-pressed="true">Tümü</button>' +
+      slugs.map((sl) => '<button class="chip" type="button" data-f="' + esc(sl) + '" aria-pressed="false" style="--c:' + colorOf(sl) + '"><i></i><span lang="en">' + esc(nameOf(sl)) + '</span></button>').join('') + '</div>' +
+      '<div class="cal-tabs" role="group" aria-label="Gün seç">' +
+      days.map((x) => '<button class="cal-tab" type="button" data-day="' + x.i + '" aria-pressed="' + (x.i === calDay) + '"><b>' + SHORT[x.i] + '</b><small>' + (x.i === t ? 'BUGÜN' : x.list.length + ' DERS') + '</small></button>').join('') + '</div>' +
+      '<div class="cal-week" style="--n:' + Math.max(1, days.length) + '">' +
+      days.map((x) => '<section class="cal-day' + (x.i === t ? ' today' : '') + (x.i === calDay ? ' sel' : '') + '" data-day="' + x.i + '" aria-label="' + x.d + '">' +
+        '<div class="cal-dh"><b>' + x.d + '</b>' + (x.i === t ? '<em>BUGÜN</em>' : '') + '</div>' +
+        x.list.map(ses).join('') + '<div class="cal-none">Bu gün bu ders yok.</div></section>').join('') + '</div>' +
+      '<div class="cal-foot"><span>' + esc(prog.note || '') + (prog.source ? ' Kaynak: <a class="src" href="' + esc(prog.source) + '" target="_blank" rel="noopener">deepacademia.com.tr/takvim</a>' : '') + '</span>' +
+      '<a class="btn btn-lime" href="#kayit" style="padding: 16px 28px; border-radius: 40px; font-size: 13px; font-weight: 700; letter-spacing: .14em">KAYIT OL ' + ARR + '</a></div>';
+    $$('.cal-filters .chip', cal).forEach((b) => b.addEventListener('click', () => { calFilter = b.dataset.f; applyCal(); }));
+    $$('.cal-tab', cal).forEach((b) => b.addEventListener('click', () => { calDay = +b.dataset.day; applyCal(); }));
+    applyCal();
+  }
+  function applyCal() {
+    $$('.cal-filters .chip', cal).forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.f === calFilter)));
+    $$('.cal-tab', cal).forEach((b) => b.setAttribute('aria-pressed', String(+b.dataset.day === calDay)));
+    $$('.cal-day', cal).forEach((d) => {
+      let shown = 0;
+      $$('.ses', d).forEach((s) => { const on = calFilter === 'all' || s.dataset.slugs.split(' ').includes(calFilter); s.hidden = !on; if (on) shown++; });
+      d.classList.toggle('empty', !shown);
+      d.dataset.shown = String(shown);
+    });
+    // phones: the day tabs follow the filter, and jump to a day that has the chosen class
+    const counts = {};
+    $$('.cal-day', cal).forEach((d) => { counts[d.dataset.day] = +d.dataset.shown; });
+    if (calFilter !== 'all' && !counts[calDay]) { const first = Object.keys(counts).find((k) => counts[k]); if (first !== undefined) calDay = +first; }
+    const t = todayIdx();
+    $$('.cal-tab', cal).forEach((b) => {
+      const n = counts[b.dataset.day] || 0;
+      $('small', b).textContent = +b.dataset.day === t ? 'BUGÜN' : n ? n + ' DERS' : '—';
+      b.classList.toggle('none', !n);
+      b.setAttribute('aria-pressed', String(+b.dataset.day === calDay));
+    });
+    $$('.cal-day', cal).forEach((d) => d.classList.toggle('sel', +d.dataset.day === calDay));
+  }
+
+  function renderClass(slug) {
+    if (!dz) return;
+    dz.dataset.slug = slug;
+    const box = $('.ovl-in', dz);
+    const hid = '<h2 class="ovl-h" id="dz-h" tabindex="-1" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Ders içeriği</h2>';
+    if (!prog) { box.innerHTML = hid + '<div class="ovl-load">Yükleniyor…</div><p class="ovl-fail">Ders içeriği yüklenemedi. <a href="https://www.deepacademia.com.tr/derslerimiz/" target="_blank" rel="noopener">deepacademia.com.tr/derslerimiz</a> sayfasına bakabilirsiniz.</p>'; return; }
+    const c = prog.classes[slug];
+    if (!c) { box.innerHTML = hid + '<p class="dz-none">Bu ders bulunamadı.</p>'; return; }
+    const times = prog.sessions.filter((s) => slugsOf(s).includes(slug)).sort(byTime);
+    const col = colorOf(slug);
+    box.innerHTML =
+      '<article class="dz-art">' +
+      '<figure class="dz-media">' + (c.img ? '<img src="' + esc(c.img) + '" alt="' + esc(c.imgAlt || c.title) + '">' : '') + '</figure>' +
+      '<div class="dz-text">' +
+      (c.tag ? '<span class="ctag" style="color:' + col + '">' + esc(c.tag) + '</span>' : '') +
+      '<h2 class="ovl-h" id="dz-h" lang="en" tabindex="-1">' + esc(c.title) + '</h2>' +
+      (c.tagline ? '<p class="dz-tagline">' + esc(c.tagline) + '</p>' : '') +
+      (c.paragraphs || []).map((t) => '<p class="dz-p">' + esc(t) + '</p>').join('') +
+      ((c.benefits || []).length ? '<h3 class="dz-sh">Öne çıkanlar</h3><ol class="dz-ben">' + c.benefits.map((it) => '<li>' + esc(it) + '</li>').join('') + '</ol>' : '') +
+      '<h3 class="dz-sh">Haftalık ders saatleri</h3>' +
+      (times.length
+        ? '<ul class="dz-times">' + times.map((s) => '<li style="--c:' + col + '"><span class="d">' + esc(s.day) + '</span><span class="t">' + timeOf(s) + '</span>' + '<span class="w">' + esc([slugsOf(s).length > 1 ? s.name : '', s.trainer, s.place].filter(Boolean).join(' · ')) + '</span></li>').join('') + '</ul>'
+        : '<p class="dz-none">Bu ders şu an haftalık programda yer almıyor. Güncel saatler için bizi arayın: <a class="f-link" href="tel:+905449403729">0544 940 37 29</a></p>') +
+      '<div class="dz-ctas"><a class="btn btn-lime" href="#program">TÜM PROGRAM ' + ARR + '</a><a class="btn btn-ghost" href="#kayit">KAYIT OL</a></div>' +
+      ((c.faq || []).length ? '<h3 class="dz-sh">Sıkça sorulan sorular</h3><div class="dz-faq">' + c.faq.map((f) => '<details><summary>' + esc(f.q) + '</summary><p>' + esc(f.a) + '</p></details>').join('') + '</div>' : '') +
+      '</div></article>' +
+      '<nav class="dz-more" aria-label="Diğer dersler"><h3 class="dz-sh" style="margin-top:0">Diğer dersler</h3><div class="dz-chips">' +
+      (prog.order || Object.keys(prog.classes)).filter((sl) => prog.classes[sl]).map((sl) => '<a class="chip" href="#ders-' + esc(sl) + '" style="--c:' + colorOf(sl) + '"' + (sl === slug ? ' aria-current="page"' : '') + '><i></i><span lang="en">' + esc(prog.classes[sl].title) + '</span></a>').join('') +
+      '</div></nav>';
+    $('.ovl-body', dz).scrollTop = 0;
+  }
+
+  function showPanel(el, on) {
+    if (!el || isOpen(el) === on) return;
+    el.classList.toggle('open', on);
+    el.setAttribute('aria-hidden', on ? 'false' : 'true');
+    if (on) { el.removeAttribute('inert'); if (menuOpen) setMenu(false); ensureData(); } else el.setAttribute('inert', '');
+  }
+  function route() {
+    const h = location.hash || '';
+    const m = /^#ders-([a-z0-9-]+)$/.exec(h);
+    const wasOpen = ovlOpen(), prevTop = isOpen(dz) ? dz : isOpen(cal) ? cal : null;
+    if (h === '#program') { showPanel(cal, true); showPanel(dz, false); renderCal(); }
+    else if (m) { if (dz.dataset.slug !== m[1] || !dz.dataset.slug || !$('.dz-art', dz)) renderClass(m[1]); showPanel(dz, true); }
+    else { showPanel(dz, false); showPanel(cal, false); }
+    const open = ovlOpen(), topEl = isOpen(dz) ? dz : isOpen(cal) ? cal : null;
+    html.classList.toggle('ovl-on', open);
+    if (cal) cal.inert = !isOpen(cal) || topEl === dz;
+    // the page behind is inert while a panel is open (only on a change: the tour manages it while it is open)
+    if (open !== wasOpen) {
+      [...(cal || dz).parentElement.children].forEach((el) => {
+        if (el === cal || el === dz || el === tour) return;
+        el.inert = open;
+      });
+    }
+    const head = (el) => el && $('.ovl-h[tabindex]', el);
+    const usable = (el) => el && el.isConnected && el.focus && !el.closest('[inert],[aria-hidden="true"]');
+    if (open) {
+      sm.anim = null; sm.run = false;
+      if (prevTop === dz && topEl === cal) {
+        // back from a class to the timetable: to the card that opened it
+        const o = openers.pop();
+        const f = usable(o) && cal.contains(o) ? o : head(cal);
+        if (f) f.focus({ preventScroll: true });
+      } else if (topEl !== prevTop || !topEl.contains(document.activeElement) || document.activeElement === document.body) {
+        const el = topEl;
+        setTimeout(() => { const f = head(el); if (f && isOpen(el)) f.focus({ preventScroll: true }); }, wasOpen ? 0 : 60);
+      }
+    } else if (wasOpen) {
+      const o = openers[0];
+      openers.length = 0;
+      if (skipRestore) skipRestore = false;
+      else if (usable(o)) o.focus({ preventScroll: true });
+    }
+  }
+  function openRoute(h) {
+    if (location.hash === h) { route(); return; }
+    const depth = (history.state && history.state.ovl) || 0;
+    // one class to another inside the details panel: replace, so ✕ / Back still close in one step
+    if (/^#ders-/.test(location.hash) && /^#ders-/.test(h) && depth) history.replaceState({ ovl: depth }, '', h);
+    else {
+      // the opener; a link in the (now closing) burger menu hands focus back to the burger
+      let o = document.activeElement;
+      if (!o || o === document.body || o.closest('.menu,[aria-hidden="true"]')) o = $('.burger');
+      openers.push(o);
+      history.pushState({ ovl: depth + 1 }, '', h);
+    }
+    route();
+  }
+  function closeTop() {
+    if (history.state && history.state.ovl) { history.back(); return; }
+    // opened straight from a link to this address: there is nothing to go back to
+    history.replaceState(null, '', isOpen(dz) && isOpen(cal) ? '#program' : location.pathname + location.search);
+    route();
+  }
+  function closePanels(then) {
+    const n = (history.state && history.state.ovl) || 0;
+    if (then) skipRestore = true;       // focus goes to where the link leads, not back to the opener
+    if (n) { afterClose = then || null; history.go(-n); return; }
+    history.replaceState(null, '', location.pathname + location.search);
+    route();
+    if (then) setTimeout(then, 0);
+  }
+  if (cal && dz) {
+    $$('.ovl-x', cal).concat($$('.ovl-x', dz)).forEach((b) => b.addEventListener('click', closeTop));
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && ovlOpen() && !tourOpen) { e.preventDefault(); closeTop(); } });
+    const onNav = () => {
+      route();
+      if (!ovlOpen() && afterClose) { const f = afterClose; afterClose = null; setTimeout(f, 0); }
+    };
+    window.addEventListener('popstate', onNav);
+    window.addEventListener('hashchange', onNav);
+    if (isPanelRoute(location.hash)) route();
+    // fetch the data once the page is idle, so the first open is instant
+    const idle = window.requestIdleCallback || ((f) => setTimeout(f, 2500));
+    window.addEventListener('load', () => idle(() => ensureData()));
+  }
+
+  measure(); if (E.live) dalSetup(); tick();
   const ready = () => { measure(); tick(); };
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(ready); else window.addEventListener('load', ready);
   window.addEventListener('load', () => { measure(); tick(); });

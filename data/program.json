@@ -1,0 +1,469 @@
+{
+ "source": "https://www.deepacademia.com.tr/takvim/",
+ "intro": "Hedeflerine ulaşmak için zamanı senin adına planladık! Deep Academia Fitness Center’da haftalık grup ders takvimiyle enerjini doğru zamanda zirveye taşı. Pilates’ten Crunch’a, Spinning’den Tabata’ya kadar her ders, seni daha güçlü ve motive bir versiyonuna bir adım daha yaklaştırmak için hazırlandı.",
+ "note": "Hafta sonu grup dersi yok. Salon hafta içi 08:00–22:00, cumartesi 09:00–21:00, pazar 12:00–20:00 açık.",
+ "order": [
+  "pilates",
+  "crunch",
+  "stretching",
+  "spinning",
+  "fat-burn",
+  "step-aerobic",
+  "tabata"
+ ],
+ "sessions": [
+  {
+   "day": "Pazartesi",
+   "start": "09:00",
+   "end": "",
+   "name": "Pilates",
+   "slugs": [
+    "pilates"
+   ],
+   "trainer": "",
+   "place": ""
+  },
+  {
+   "day": "Pazartesi",
+   "start": "15:00",
+   "end": "",
+   "name": "Crunch",
+   "slugs": [
+    "crunch"
+   ],
+   "trainer": "",
+   "place": ""
+  },
+  {
+   "day": "Pazartesi",
+   "start": "19:00",
+   "end": "",
+   "name": "Pilates",
+   "slugs": [
+    "pilates"
+   ],
+   "trainer": "",
+   "place": ""
+  },
+  {
+   "day": "Salı",
+   "start": "15:00",
+   "end": "",
+   "name": "Crunch",
+   "slugs": [
+    "crunch"
+   ],
+   "trainer": "",
+   "place": ""
+  },
+  {
+   "day": "Salı",
+   "start": "18:00",
+   "end": "",
+   "name": "Spinning",
+   "slugs": [
+    "spinning"
+   ],
+   "trainer": "",
+   "place": ""
+  },
+  {
+   "day": "Salı",
+   "start": "19:00",
+   "end": "",
+   "name": "Step & Fat Burn",
+   "slugs": [
+    "step-aerobic",
+    "fat-burn"
+   ],
+   "trainer": "",
+   "place": ""
+  },
+  {
+   "day": "Çarşamba",
+   "start": "09:00",
+   "end": "",
+   "name": "Pilates",
+   "slugs": [
+    "pilates"
+   ],
+   "trainer": "",
+   "place": ""
+  },
+  {
+   "day": "Çarşamba",
+   "start": "15:00",
+   "end": "",
+   "name": "Crunch",
+   "slugs": [
+    "crunch"
+   ],
+   "trainer": "",
+   "place": ""
+  },
+  {
+   "day": "Çarşamba",
+   "start": "19:00",
+   "end": "",
+   "name": "Pilates",
+   "slugs": [
+    "pilates"
+   ],
+   "trainer": "",
+   "place": ""
+  },
+  {
+   "day": "Perşembe",
+   "start": "15:00",
+   "end": "",
+   "name": "Crunch",
+   "slugs": [
+    "crunch"
+   ],
+   "trainer": "",
+   "place": ""
+  },
+  {
+   "day": "Perşembe",
+   "start": "19:00",
+   "end": "",
+   "name": "Tabata",
+   "slugs": [
+    "tabata"
+   ],
+   "trainer": "",
+   "place": ""
+  },
+  {
+   "day": "Cuma",
+   "start": "09:00",
+   "end": "",
+   "name": "Pilates · Stretching",
+   "slugs": [
+    "pilates",
+    "stretching"
+   ],
+   "trainer": "",
+   "place": "",
+   "link": "stretching"
+  },
+  {
+   "day": "Cuma",
+   "start": "15:00",
+   "end": "",
+   "name": "Crunch",
+   "slugs": [
+    "crunch"
+   ],
+   "trainer": "",
+   "place": ""
+  },
+  {
+   "day": "Cuma",
+   "start": "19:00",
+   "end": "",
+   "name": "Stretching",
+   "slugs": [
+    "stretching"
+   ],
+   "trainer": "",
+   "place": ""
+  }
+ ],
+ "classes": {
+  "pilates": {
+   "title": "Pilates",
+   "tag": "MOBİLİTE",
+   "tagline": "Esneklik, denge ve core gücü için Pilates. Kuşadası Deep Academia’da her seviyeye uygun dersler ve uzman rehberlik seni bekliyor.",
+   "img": "assets/pilates.jpg",
+   "imgAlt": "Reformer pilates",
+   "paragraphs": [
+    "Deep Academia Fitness Center’da Pilates, kontrollü hareketler ve doğru nefes tekniği ile vücudun derin kaslarını güvenli bir şekilde aktive etmeyi hedefler. Programlarımız, postürü iyileştirirken merkez bölgeyi güçlendirir; böylece günlük hayatta hissedilir bir rahatlama ve güçlü bir duruş oluşur. Her seviyeye uygun sınıflarımızda amacımız, katılımcıya sürdürülebilir bir gelişim planı sunmaktır.",
+    "Kuşadası’nda modern bir fitness deneyimi arayanlar için Pilates, hem esneklik hem de dengeyi artıran ideal bir seçenektir. Eğitmenlerimiz, hareketleri kişisel ihtiyaçlarınıza göre uyarlayarak güvenli ve verimli ilerlemenizi sağlar. Düzenli katılım; beden farkındalığını, nefes kalitesini ve hareket kabiliyetini belirgin şekilde yükseltir."
+   ],
+   "benefits": [
+    "Duruş ve Postür Dengesi",
+    "Merkez Gücü",
+    "Esneklik ve Hareket Açıklığı",
+    "Nefes Kontrolü",
+    "Bel-Boyun Desteği",
+    "Zihin-Beden Uyumu"
+   ],
+   "faq": [
+    {
+     "q": "Pilates’e kimler katılabilir?",
+     "a": "Yeni başlayanlar dahil, her yaştan ve seviyeden üyemiz katılabilir. Gerekli durumlarda eğitmenlerimiz hareketleri kişiselleştirir."
+    },
+    {
+     "q": "Ekipman sağlıyor musunuz?",
+     "a": "Mat ve yardımcı ekipmanlar (lastik, pilates topu vb.) merkezimizde mevcuttur; kendi matınızı getirmek isterseniz elbette kullanabilirsiniz."
+    },
+    {
+     "q": "Haftada kaç ders önerirsiniz?",
+     "a": "Hedefe göre değişir; genellikle haftada 2–3 ders düzenli ilerleme için idealdir."
+    },
+    {
+     "q": "Bel veya boyun hassasiyetim var, katılabilir miyim?",
+     "a": "Doktor onayı ile katılabilirsiniz. Eğitmenimiz uygun varyasyonlar ve kontrollü tempo ile güvenli bir deneyim sağlar."
+    },
+    {
+     "q": "Pilates kilo vermeye yardımcı olur mu?",
+     "a": "Pilates, kas dengesini ve duruşu iyileştirirken metabolik aktiviteyi destekler. Yağ yakımı hedefi olan üyelerimiz için kardiyo derslerimizle kombine bir plan öneririz."
+    }
+   ],
+   "source": "https://www.deepacademia.com.tr/pilates/"
+  },
+  "crunch": {
+   "title": "Crunch",
+   "tag": "CORE",
+   "tagline": "Karın ve core odaklı Crunch dersleriyle duruşunu güçlendir, merkez kaslarını aktive et. Kuşadası Deep Academia’da uygun seanslarını seç.",
+   "img": "assets/crunch.jpg",
+   "imgAlt": "Karın antrenmanı",
+   "paragraphs": [
+    "Crunch derslerimiz, karın kaslarını etkin ve güvenli biçimde çalıştıran kontrollü egzersiz serilerinden oluşur. Amaç yalnızca görsel bir sıkılaşma değil; omurgaya destek veren merkez kaslarının güçlenmesiyle günlük hareketlerde denge ve güven kazanmaktır.",
+    "Deep Academia Fitness Center Kuşadası program akışı; nefes, tempo ve doğru form üçlüsü üzerine kuruludur. Yeni başlayanlar da ileri seviye üyeler de kendi seviyelerinde ilerler; böylece sakatlanma riski düşer, gelişim sürdürülebilir hâle gelir."
+   ],
+   "benefits": [
+    "Karın Kaslarında Güçlenme",
+    "Duruşta İyileşme",
+    "Spor Performansına Destek",
+    "Gövde Stabilitesi ve Denge",
+    "Fonksiyonel Güç ve Koruma",
+    "Yağ Yakımı"
+   ],
+   "faq": [
+    {
+     "q": "Crunch dersleri sadece mekik midir?",
+     "a": "Hayır. Derin karın kaslarını hedefleyen çeşitli kontrollü hareketlerle merkezin tamamını çalıştırırız."
+    },
+    {
+     "q": "Yeni başlayan biri zorlanır mı?",
+     "a": "Hareketler seviye bazlıdır. Eğitmenimiz kolaydan zora kademeli ilerler, doğru formu sürekli hatırlatır."
+    },
+    {
+     "q": "Haftada kaç ders almalıyım?",
+     "a": "Genellikle 2–3 ders, diğer antrenmanlarla dengeli bir gelişim sağlar."
+    },
+    {
+     "q": "Sırtım hassas, katılabilir miyim?",
+     "a": "Doktor onayıyla ve eğitmen rehberliğinde uygun varyasyonlarla katılabilirsiniz. Odak noktamız güvenliktir."
+    },
+    {
+     "q": "Crunch yağ yakar mı?",
+     "a": "Crunch temel olarak güç kazandırır. Yağ yakımı için Fat Burn, Spinning gibi kardiyo dersleriyle kombine öneririz."
+    }
+   ],
+   "source": "https://www.deepacademia.com.tr/crunch/"
+  },
+  "stretching": {
+   "title": "Stretching",
+   "tag": "ESNEKLİK",
+   "tagline": "Esneklik ve hareket kabiliyetini artıran Stretching dersleri. Kuşadası Deep Academia’da postürünü iyileştir, rahatla, yenilen.",
+   "img": "assets/stretching.jpg",
+   "imgAlt": "Esneme hareketi",
+   "paragraphs": [
+    "Stretching dersleri, kasları güvenli aralıklarda esneterek hareket açıklığını artırmayı ve gerginliği azaltmayı hedefler. Düzenli uygulama; postür, eklem sağlığı ve hareket kalitesi üzerinde olumlu etki yaratır.",
+    "Deep Academia Fitness Center Kuşadası’nda oturumlar sakin, odaklı ve öğretici bir akışla ilerler. Gün boyu masa başında çalışanlar veya yoğun antrenman yapan sporcular için dengeleyici bir çözümdür."
+   ],
+   "benefits": [
+    "Esneklik ve Mobilite",
+    "Kas Gerginliğinde Azalma",
+    "Hareket Kalitesinde Artış",
+    "Toparlanma Sürecine Destek",
+    "Duruşta İyileşme",
+    "Stres Yönetimi ve Rahatlama"
+   ],
+   "faq": [
+    {
+     "q": "Esneme öncesi ısınmak gerekir mi?",
+     "a": "Evet. Kısa bir mobilizasyon/ısınma, kasların esnemeye güvenle yanıt vermesini sağlar."
+    },
+    {
+     "q": "Hangi sıklıkta önerilir?",
+     "a": "Haftada 2–3 ders, spora eşlik eden günlük kısa rutinlerle desteklenirse en verimli sonucu verir."
+    },
+    {
+     "q": "Acı hissi normal mi?",
+     "a": "Hafif gerilme normaldir; keskin ağrı olmamalıdır. Eğitmen, güvenli sınırı hatırlatır."
+    },
+    {
+     "q": "Ofis çalışanlarına uygun mu?",
+     "a": "Kesinlikle. Boyun–omuz–kalça hattında rahatlama sağlar, gün sonu gerginliğini azaltır."
+    },
+    {
+     "q": "Ekipman kullanılıyor mu?",
+     "a": "Mat, blok ve bant gibi destekleyici ekipmanlar opsiyonel olarak kullanılabilir."
+    }
+   ],
+   "source": "https://www.deepacademia.com.tr/stretching/"
+  },
+  "spinning": {
+   "title": "Spinning",
+   "tag": "KARDİYO",
+   "tagline": "Yüksek enerjili Spinning ile kardiyo dayanıklılığını artır, kalori yak. Kuşadası Deep Academia’da ritmi yakala, hedefe pedalla.",
+   "img": "assets/spinning.jpg",
+   "imgAlt": "Spinning bisikleti",
+   "paragraphs": [
+    "Spinning, sabit bisikletler üzerinde ritimle senkron ilerleyen, yüksek motivasyonlu bir kardiyo antrenmanıdır. Direnç ve tempo değişimleri kalp-damar sağlığını desteklerken bacak– kalça hattında belirgin güçlenme sağlar.",
+    "Deep Academia Fitness Center Kuşadası’nda her bisiklet kişiye göre ayarlanır; katılımcı seviyesine uygun dirençle çalışır. Müziğin enerjisi ve grup sinerjisi, sürdürülebilir katılım ve performans gelişimi için ideal ortamı oluşturur."
+   ],
+   "benefits": [
+    "Kardiyo Dayanıklılık",
+    "Düşük Darbeli Çalışma",
+    "Ritim ve Grup Motivasyonu",
+    "Bacak Gücü ve Sıkılaşma",
+    "Yüksek Kalori Harcaması",
+    "Ölçülebilir Performans Takibi"
+   ],
+   "faq": [
+    {
+     "q": "Yeni başlayanlar zorlanır mı?",
+     "a": "Direnç ve tempo kişiselleştirildiği için güvenle katılabilirsiniz; eğitmenimiz sizi uygun seviyede tutar."
+    },
+    {
+     "q": "Diz ve eklemler için uygun mu?",
+     "a": "Düşük darbeli yapısı nedeniyle genellikle iyi tolere edilir; özel durumlarda doktor onayı önerilir."
+    },
+    {
+     "q": "Nasıl giyinmeliyim?",
+     "a": "Nefes alan spor kıyafetleri ve tabanı sert, pedal dostu ayakkabılar idealdir. Su ve havlu getirmenizi öneririz."
+    },
+    {
+     "q": "Kalori yakımı neye bağlı?",
+     "a": "Direnç, süre ve kişisel efora göre değişir. Düzenli katılım sürdürülebilir sonuç sağlar."
+    },
+    {
+     "q": "Kuşadası’nda neden bizi tercih etmelisiniz?",
+     "a": "Profesyonel eğitmen kadrosu, modern ekipman ve motive edici atmosferle hedeflerinize planlı biçimde ilerlersiniz."
+    }
+   ],
+   "source": "https://www.deepacademia.com.tr/spinning/"
+  },
+  "fat-burn": {
+   "title": "Fat Burn",
+   "tag": "YAĞ YAKIMI",
+   "tagline": "Yüksek tempolu Fat Burn ile kalori yak, dayanıklılığını artır. Kuşadası Deep Academia’da bilimsel programlar ve güçlü motivasyon.",
+   "img": "assets/fat-burn.jpg",
+   "imgAlt": "Fat Burn dersinde antrenman yapan sporcular",
+   "paragraphs": [
+    "Fat Burn derslerimiz, kardiyo ve direnç egzersizlerini akıllı bir sırayla birleştirir; nabzı kontrollü şekilde yükselterek yağ yakımını destekler. Çeşitli istasyonlar ve süre odaklı setler, hem tempoyu dinamik tutar hem de farklı kas gruplarını etkinleştirir.",
+    "Deep Academia Fitness Center Kuşadası çatısı altında, her seviyeye uygun ölçekleme ile güvenli ve motive edici bir ortam sunuyoruz. Düzenli katılım; dayanıklılığı artırır, vücut kompozisyonunu iyileştirir ve günlük enerji seviyelerini yükseltir."
+   ],
+   "benefits": [
+    "Yüksek Kalori Harcaması",
+    "Kardiyovasküler Dayanıklılık",
+    "Grup Motivasyonu",
+    "Metabolizma Hızında Artış",
+    "Tüm Vücut Sıkılaşması",
+    "Kalıcı Aktiflik"
+   ],
+   "faq": [
+    {
+     "q": "Dersin yoğunluğu nasıl?",
+     "a": "Orta-yüksek yoğunlukta ilerler; eğitmenimiz seviyenize göre süre ve tempoyu ayarlar."
+    },
+    {
+     "q": "Yağ yakımı için kaç ders gerekir?",
+     "a": "Hedefe göre değişir. Haftada 2–3 ders ve dengeli beslenmeyle belirgin ilerleme gözlemlenir."
+    },
+    {
+     "q": "Ekipman kullanılıyor mu?",
+     "a": "Evet. Serbest ağırlıklar, lastikler ve vücut ağırlığı istasyonlarıyla dengeli içerik sunarız."
+    },
+    {
+     "q": "Yeni başlayanlar katılabilir mi?",
+     "a": "Evet. Ölçeklenebilir yapı sayesinde güvenli bir başlangıç yapılabilir."
+    },
+    {
+     "q": "Kuşadası’nda neden Deep Academia?",
+     "a": "Kurumsal yaklaşım, planlı program akışı ve motive edici ortamla sürdürülebilir sonuç odaklı çalışırız."
+    }
+   ],
+   "source": "https://www.deepacademia.com.tr/fat-burn/"
+  },
+  "step-aerobic": {
+   "title": "Step Aerobic",
+   "tag": "KARDİYO",
+   "tagline": "Ritim, koordinasyon ve sıkılaşma için Step Aerobic. Kuşadası Deep Academia’da eğlenceli koreografiler ve yüksek motivasyon.",
+   "img": "assets/step-aerobic.jpg",
+   "imgAlt": "Step platformlarında step aerobik dersi",
+   "paragraphs": [
+    "Step Aerobic, platform üzerine ritmik adım kombinasyonlarıyla yapılan, neşeli ve yüksek motivasyonlu bir kardiyo antrenmanıdır. Tempolu müzik eşliğinde hareket ederken hem kalori harcanır hem de bacak–kalça bölgesinde belirgin bir güçlenme sağlanır.",
+    "Deep Academia Fitness Center Kuşadası çatısı altında koreografiler seviye seviye ilerler; amaç herkesin güvenle ritme katılmasıdır. Eğlenceli enerji, düzenli katılımı kolaylaştırır ve kardiyovasküler kapasitede gözle görülür gelişim sağlar."
+   ],
+   "benefits": [
+    "Ritim ve Koordinasyon",
+    "Kardiyo Dayanıklılık",
+    "Denge ve Çeviklik",
+    "Alt Vücut Gücü",
+    "Yağ Yakımına Destek",
+    "Motive Edici Atmosfer"
+   ],
+   "faq": [
+    {
+     "q": "Dans geçmişi zorunlu mu?",
+     "a": "Hayır. Adımlar sade ve öğretici bir tempoda ilerler; katılımcılar kısa sürede uyum sağlar."
+    },
+    {
+     "q": "Diz hassasiyeti olanlar katılabilir mi?",
+     "a": "Doktor onayıyla ve alçak step yüksekliğiyle güvenli alternatifler sunulur."
+    },
+    {
+     "q": "Kalori yakımı ne kadar?",
+     "a": "Yoğunluğa göre değişir; ritim, tempo ve süre arttıkça harcama yükselir."
+    },
+    {
+     "q": "Hangi ayakkabıyı önerirsiniz?",
+     "a": "Darbe emici, yan destekli ve tabanı esnek spor ayakkabıları uygundur"
+    },
+    {
+     "q": "Kuşadası Fitness Center’da ders saatlerini nereden görürüm?",
+     "a": "Güncel “Takvim” sayfamızdan haftalık program ve saatleri takip edebilirsiniz."
+    }
+   ],
+   "source": "https://www.deepacademia.com.tr/step-aerobic/"
+  },
+  "tabata": {
+   "title": "Tabata",
+   "tag": "HIIT",
+   "tagline": "Yüksek yoğunluklu Tabata ile kısa sürede etkili sonuç. Kuşadası Deep Academia’da afterburn etkisi ve güvenli protokoller.",
+   "img": "assets/tabata.jpg",
+   "imgAlt": "Tabata dersinde squat yapan sporcular",
+   "paragraphs": [
+    "Tabata, 20 saniye maksimum efor + 10 saniye dinlenme döngüsünün 8 set uygulanmasıyla kısa sürede güçlü bir uyaran sağlayan HIIT metodudur. Bu yapı, hem aerobik hem anaerobik kapasiteyi hedefler ve düzenli uygulandığında belirgin performans artışı sunar.",
+    "Deep Academia Fitness Center Kuşadası’nda Tabata seansları, profesyonel gözetim ve ölçeklenebilir hareket seçenekleriyle güvenli bir çerçevede yürütülür. Zamanı sınırlı olan üyeler için yüksek verim sunması, programın en güçlü yanıdır."
+   ],
+   "benefits": [
+    "Zaman-Verimli Antrenman",
+    "Yağ Yakımında Hızlanma",
+    "Zihinsel Dayanıklılık",
+    "Dayanıklılık Artışı",
+    "Güç ve Patlayıcılık",
+    "Egzersiz Sonrası Etki"
+   ],
+   "faq": [
+    {
+     "q": "Tabata ile HIIT aynı mı?",
+     "a": "Tabata, HIIT (Yüksek Şiddetli Aralıklı Antrenman) ailesinin belirli bir protokolüdür (20/10 x 8). Yapısı net, süresi kısadır."
+    },
+    {
+     "q": "Kimler katılabilir?",
+     "a": "Genel sağlık durumu uygun olan, doktor onayı bulunan yetişkinler katılabilir; yoğunluk kişiye göre ayarlanır."
+    },
+    {
+     "q": "Isınma ve soğuma yapılıyor mu?",
+     "a": "Evet. Seanslarımızda kapsamlı ısınma ve kontrollü soğuma standarttır."
+    },
+    {
+     "q": "Haftada kaç kez önerilir?",
+     "a": "Genellikle 2 kez yeterlidir; başka derslerle dönüşümlü planlandığında toparlanma desteklenir."
+    },
+    {
+     "q": "Ekipman kullanıyor musunuz?",
+     "a": "Evet, vücut ağırlığına ek olarak kettlebell, halat, dambıl gibi fonksiyonel araçlar kullanılabilir."
+    }
+   ],
+   "source": "https://www.deepacademia.com.tr/tabata/"
+  }
+ }
+}
