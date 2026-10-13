@@ -11,7 +11,7 @@
   // Each scene: the band scrolls its title until every letter has been on screen, then it opens onto
   // the photo/video and the letters start rolling; OPEN_MS later the next scene comes in.
   const bgs = $$('.hero .bg'), cts = $$('.hero .ct'), rbs = $$('.hero .rb'), buls = $$('.hero .bul');
-  const hs = { cur: 0, leave: -1, phase: 'band', first: true, run: false, done: -1 };
+  const hs = { cur: 0, leave: -1, phase: 'band', first: true, run: false, done: -1, entering: false, leaveOpen: false };
   const OPEN_MS = 7500, HOLD_MS = 900;
   let ht = [];
   const at = (ms, fn) => ht.push(setTimeout(fn, Math.max(0, ms)));
@@ -27,26 +27,28 @@
   }
   function heroApply() {
     const state = (i) => i === hs.cur
-      ? ' cur' + (hs.phase === 'open' ? ' open' : ' band') + (hs.first ? ' first' : '')
-      : (i === hs.leave ? ' leave' : '');
+      ? ' cur' + (hs.phase === 'open' ? ' open' : ' band') + (hs.first ? ' first' : '') + (hs.entering ? ' in' : '')
+      : (i === hs.leave ? ' leave' + (hs.leaveOpen ? ' o' : '') : '');
     bgs.forEach((e, i) => { e.className = 'bg' + state(i); });
     cts.forEach((e, i) => { e.className = 'ct' + state(i); });
     rbs.forEach((e, i) => { e.className = 'rb' + state(i); if (i !== hs.cur && i !== hs.leave) flipOff(i); });
     buls.forEach((e, i) => { e.className = 'bul' + (i === hs.cur && hs.run ? ' run' : '') + (i === hs.done ? ' done' : ''); });
   }
   function heroSet(p) { Object.assign(hs, p); heroApply(); }
-  // the band holds still while it slides / closes in, then scrolls from its first letter
-  const stillMs = (first) => (first ? 1300 : 1000);
+  // the band holds still while it slides in (first scene) or while the next scene sweeps in over the old
+  // one (.85s close + 1.6s gradient sweep, see .in in styles.css), then scrolls from its first letter
+  const SWEEP_END = 2600;
+  const stillMs = (first) => (first ? 1300 : SWEEP_END);
   function prepScene(i, first) {
     flipOff(i);
     if (rbs[i]) rbs[i].style.setProperty('--rbdl', stillMs(first) / 1000 + 's');
   }
   function runScene(i, first) {
-    const runAt = first ? 2000 : 1000, minOpen = first ? 4500 : 3500;
+    const runAt = first ? 2000 : SWEEP_END, minOpen = 4500;
     at(runAt, () => {
       const openAt = Math.max(minOpen, stillMs(first) + readMs(i)), nextAt = openAt + OPEN_MS;
       if (buls[i]) buls[i].style.setProperty('--fill', (nextAt - runAt) / 1000 + 's');
-      heroSet(first ? { run: true } : { leave: -1, run: true, done: -1 });
+      heroSet(first ? { run: true } : { leave: -1, run: true, done: -1, entering: false });
       at(openAt - runAt, () => { heroSet({ phase: 'open', first: false }); flipOn(i); });
       at(nextAt - runAt, () => heroNext());
     });
@@ -56,7 +58,7 @@
     if (n === hs.cur) return;
     clearAll();
     prepScene(n, false);
-    heroSet({ leave: hs.cur, cur: n, phase: 'band', first: false, run: false, done: hs.cur });
+    heroSet({ leave: hs.cur, leaveOpen: hs.phase === 'open', cur: n, phase: 'band', first: false, run: false, done: hs.cur, entering: true });
     runScene(n, false);
   }
 
