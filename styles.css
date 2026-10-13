@@ -467,3 +467,7 @@ html.tour-on{overflow:hidden}
 
 /* ---------- reduced motion: the band does not scroll, so its title must fit on screen ---------- */
 @media (prefers-reduced-motion: reduce){.rb-title{font-size:min(204px, calc((100vw - 2 * max(29px, calc(29px + 4.76vw))) / 6.8))}}
+
+/* ---------- hero scene bullets: in the free strip under the header, visible on the first screen
+   (they sat below the fold, behind the floating pill nav) ---------- */
+.hero .buls{top:30px;bottom:auto}

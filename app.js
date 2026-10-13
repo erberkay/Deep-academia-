@@ -116,14 +116,24 @@
     heroApply();
     runScene(0, true);
     buls.forEach((b, i) => b.addEventListener('click', () => heroNext(i)));
-    // timers are throttled in a background tab while CSS keeps moving: replay the scene on return
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) { clearAll(); return; }
+    // replay the current scene from its first letter when its timing no longer matches what is on screen
+    const replay = () => {
+      clearAll();
       const i = hs.cur;
       hs.queued = null;
       prepScene(i, false);
       heroSet({ leave: -1, phase: 'band', first: false, run: false, done: -1, entering: false });
       runScene(i, false);
+    };
+    // timers are throttled in a background tab while CSS keeps moving
+    document.addEventListener('visibilitychange', () => { if (document.hidden) clearAll(); else replay(); });
+    // a rotation / width change during the band changes font size, title width and speed: start over
+    // (height-only resizes, like a phone's address bar, are ignored)
+    let heroW = window.innerWidth;
+    window.addEventListener('resize', () => {
+      if (window.innerWidth === heroW) return;
+      heroW = window.innerWidth;
+      if (hs.phase === 'band' && !hs.entering) requestAnimationFrame(replay);
     });
   }
 
