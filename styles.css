@@ -245,8 +245,8 @@ a{color:#D6FB00}a:hover{color:#ffffff}
    flows into the next colour and the photo dissolves into the next one (with a slow settle-in zoom)
    instead of switching at once. The old band first closes back into one band, then the sweep starts. */
 .bg.cur.in,.rb.cur.in{-webkit-mask-image:linear-gradient(90deg,#000 0,#000 43%,transparent 57%,transparent 100%);mask-image:linear-gradient(90deg,#000 0,#000 43%,transparent 57%,transparent 100%);-webkit-mask-size:300% 100%;mask-size:300% 100%;-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;animation:sweepIn 1.6s cubic-bezier(.65,0,.35,1) .85s both}
-@keyframes sweepIn{from{-webkit-mask-position:100% 0;mask-position:100% 0}to{-webkit-mask-position:0 0;mask-position:0 0}}
-.bg.cur.in .bm img{animation:bgSettle 2.8s cubic-bezier(.22,1,.36,1) .85s both}
+@keyframes sweepIn{from{-webkit-mask-position:85.5% 0;mask-position:85.5% 0}to{-webkit-mask-position:14.5% 0;mask-position:14.5% 0}}
+.bg.cur.in .bm img{animation:bgSettle 1.75s cubic-bezier(.22,1,.36,1) .85s both}
 @keyframes bgSettle{from{transform:scale(1.12)}to{transform:none}}
 .rb.cur.in .cont{transition:none}
 .rb.leave .rb-title,.rb.leave .rb-ctas{opacity:0;transition:opacity .45s ease .4s}
@@ -419,11 +419,11 @@ html.tour-on{overflow:hidden}
 .tour-btn:hover,.tour-btn:focus-visible{background:var(--lime);border-color:var(--lime);color:#111111;outline:none}
 .tour-stage{position:relative;flex:1 1 auto;min-height:0;background:#0b0b0b}
 .tour-frame{position:absolute;inset:0;width:100%;height:100%;border:0;display:block}
-.tour-start{position:absolute;inset:0;z-index:2;display:flex;align-items:center;justify-content:center;padding:32px 24px;overflow:auto;transition:opacity .7s var(--ease),visibility 0s .7s}
+.tour-start{position:absolute;inset:0;z-index:2;display:flex;align-items:center;justify-content:center;padding:0;overflow:hidden;transition:opacity .7s var(--ease)}
 .tour-start>img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;filter:brightness(.36) saturate(1.1);transform:scale(1.06);transition:transform 1.2s var(--ease)}
-.tour.live .tour-start{opacity:0;visibility:hidden;pointer-events:none}
+.tour.live .tour-start{opacity:0;visibility:hidden;pointer-events:none;transition:opacity .7s var(--ease),visibility 0s .7s}
 .tour.live .tour-start>img{transform:scale(1.25)}
-.tour-card{position:relative;display:flex;flex-direction:column;align-items:center;gap:22px;max-width:660px;margin:auto;text-align:center}
+.tour-card{position:relative;display:flex;flex-direction:column;align-items:center;gap:22px;max-width:660px;max-height:100%;overflow:auto;margin:auto;padding:32px 24px;text-align:center}
 .tour-eyebrow{font-size:14px;font-weight:600;letter-spacing:.3em;color:var(--lime)}
 .tour-title{margin:0;font-family:Anton,Kanit,sans-serif;font-weight:400;font-size:clamp(64px,10vw,140px);line-height:.92;text-transform:uppercase;color:#ffffff}
 .tour-lead{margin:0;max-width:520px;font-size:18px;line-height:1.55;font-weight:300;color:#E2E2E2}
@@ -442,8 +442,28 @@ html.tour-on{overflow:hidden}
 .tour-sp{width:18px;height:18px;border-radius:50%;border:2.5px solid rgba(17,17,17,.25);border-top-color:#111111;animation:tspin .9s linear infinite}
 @keyframes tspin{to{transform:rotate(360deg)}}
 .tour-hint{position:absolute;left:50%;bottom:28px;z-index:3;display:flex;align-items:center;height:48px;padding:0 22px;border:0;border-radius:40px;background:var(--lime);color:#111111;font-family:inherit;font-size:13px;font-weight:700;letter-spacing:.12em;white-space:nowrap;cursor:pointer;box-shadow:0 18px 40px -14px rgba(0,0,0,.7);transform:translate(-50%,20px);opacity:0;pointer-events:none;transition:opacity .35s var(--ease),transform .35s var(--ease)}
-.tour.live.away .tour-hint{opacity:1;transform:translate(-50%,0);pointer-events:auto}
+.tour-hint{visibility:hidden}
+.tour.live.away .tour-hint{opacity:1;transform:translate(-50%,0);pointer-events:auto;visibility:visible}
 .touch-only{display:none}
 @media (pointer:coarse){.key-only{display:none!important}.touch-only{display:block}.tour-hint{display:none}}
 @media (max-width:1180px){.tour-legend{display:none}}
 @media (max-width:600px){.tour-brand span{display:none}.tour-bar{padding-left:16px}.tour-lead{font-size:16px}.tour-card{gap:18px}}
+.tour-fail{display:none;margin:0;max-width:440px;font-size:16px;line-height:1.5;color:#E2E2E2}
+.tour-fail a{color:var(--lime);font-weight:700}
+.tour.fail:not(.ready) .tour-fail{display:block}
+.tour.fail:not(.ready) .tour-go{display:none}
+@media (max-height:480px){.tour-title{font-size:56px}.tour-card{gap:12px;padding:16px 24px}.tour-pad{display:none}.tour-lead{font-size:15px}.tour-eyebrow{font-size:12px}}
+@media (max-width:360px){.tour-eyebrow{letter-spacing:.18em;font-size:12px}}
+
+/* ---------- scroll-driven CTA only clickable once it shows ---------- */
+.cta-b{pointer-events:none;visibility:hidden}
+.cta-btns.on .cta-b{pointer-events:auto;visibility:visible}
+
+/* ---------- phones: lighter header, readable hero heading, full pill CTA ---------- */
+@media (pointer:coarse){.hdr{backdrop-filter:none;-webkit-backdrop-filter:none;background:rgba(25,25,25,.96)!important}}
+@media (max-width:600px){.hero .ct h2{font-size:clamp(44px,15vw,92px)!important}}
+@media (max-width:880px){.pill-nav{width:max-content;max-width:calc(100vw - 16px)}.pill-cta{white-space:nowrap;flex:0 0 auto}.pill-nav .burger{flex:0 0 auto;width:48px}}
+@media (max-width:360px){.pill-nav>a[href="#top"]{font-size:16px!important;padding:0 8px!important}}
+
+/* ---------- reduced motion: the band does not scroll, so its title must fit on screen ---------- */
+@media (prefers-reduced-motion: reduce){.rb-title{font-size:min(204px, calc((100vw - 2 * max(29px, calc(29px + 4.76vw))) / 6.8))}}

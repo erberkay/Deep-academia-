@@ -41,7 +41,11 @@
   const stillMs = (first) => (first ? 1300 : SWEEP_END);
   function prepScene(i, first) {
     flipOff(i);
-    if (rbs[i]) rbs[i].style.setProperty('--rbdl', stillMs(first) / 1000 + 's');
+    if (!rbs[i]) return;
+    rbs[i].style.setProperty('--rbdl', stillMs(first) / 1000 + 's');
+    // a band that is still leaving keeps its running scroll animation: restart it from the first letter
+    const row = $('.rb-row', rbs[i]);
+    if (row) { row.style.animation = 'none'; void row.offsetWidth; row.style.animation = ''; }
   }
   function runScene(i, first) {
     const runAt = first ? 2000 : SWEEP_END, minOpen = 4500;
@@ -49,6 +53,12 @@
       const openAt = Math.max(minOpen, stillMs(first) + readMs(i)), nextAt = openAt + OPEN_MS;
       if (buls[i]) buls[i].style.setProperty('--fill', (nextAt - runAt) / 1000 + 's');
       heroSet(first ? { run: true } : { leave: -1, run: true, done: -1, entering: false });
+      // a bullet clicked while this scene was sweeping in: go there now that the sweep has finished
+      if (hs.queued !== null && hs.queued !== undefined) {
+        const q = hs.queued;
+        hs.queued = null;
+        if (q !== hs.cur) { heroNext(q); return; }
+      }
       at(openAt - runAt, () => { heroSet({ phase: 'open', first: false }); flipOn(i); });
       at(nextAt - runAt, () => heroNext());
     });
@@ -56,9 +66,11 @@
   function heroNext(i) {
     const n = i === undefined ? (hs.cur + 1) % bgs.length : i;
     if (n === hs.cur) return;
+    // never cut a gradient sweep short (that would swap band and photo in one frame): queue the click
+    if (hs.entering) { hs.queued = n; return; }
     clearAll();
     prepScene(n, false);
-    heroSet({ leave: hs.cur, leaveOpen: hs.phase === 'open', cur: n, phase: 'band', first: false, run: false, done: hs.cur, entering: true });
+    heroSet({ leave: hs.cur, leaveOpen: hs.phase === 'open', cur: n, phase: 'band', first: false, run: false, done: hs.run ? hs.cur : -1, entering: true });
     runScene(n, false);
   }
 
@@ -104,6 +116,15 @@
     heroApply();
     runScene(0, true);
     buls.forEach((b, i) => b.addEventListener('click', () => heroNext(i)));
+    // timers are throttled in a background tab while CSS keeps moving: replay the scene on return
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) { clearAll(); return; }
+      const i = hs.cur;
+      hs.queued = null;
+      prepScene(i, false);
+      heroSet({ leave: -1, phase: 'band', first: false, run: false, done: -1, entering: false });
+      runScene(i, false);
+    });
   }
 
   /* ---------------- sliders: equipment + testimonials ---------------- */
@@ -157,98 +178,129 @@
     c.addEventListener('mouseleave', () => { html.style.setProperty('--tiltX', '0'); html.style.setProperty('--tiltY', '0'); });
   });
 
-  /* ---------------- scroll engine (ScrollTrigger + Lenis equivalents) ---------------- */
-  const E = { V: 900, s1: 2.5, mdNow: 0 };
-  const set = (k, v) => html.style.setProperty(k, String(Math.round(v * 10000) / 10000));
-  const top = (el) => el.getBoundingClientRect().top + window.scrollY;
-  const live = () => {
-    const se = document.scrollingElement || html;
-    return !reduce && se.scrollHeight > window.innerHeight + 4;
+  /* ---------------- scroll engine (ScrollTrigger + Lenis equivalents) ----------------
+     Built to stay smooth on phones:
+     - positions are measured once in measure() and cached, so a scroll frame does no layout reads;
+     - each section's values are written on that section only. Custom properties inherit, so writing them
+       on <html> made the browser restyle the whole page (about 1700 band letters included) on every frame;
+     - values and attributes that did not change are not written again;
+     - on touch screens the address bar showing/hiding does not resize every --V section mid-scroll. */
+  const E = { V: 900, w: 0, mdNow: 0, live: false };
+  const G = { club: null, bold: null, cls: null, ig: null, ints: [] };
+  const coarse = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+  const elClub = document.getElementById('kulup'), elBold = $('.bold'), elCls = document.getElementById('dersler');
+  const elCta = elClub ? $('.cta-btns', elClub) : null;
+  const written = new WeakMap();
+  const set = (el, k, v) => {
+    if (!el) return;
+    const sv = String(Math.round(v * 10000) / 10000);
+    let m = written.get(el);
+    if (!m) { m = {}; written.set(el, m); }
+    if (m[k] === sv) return;
+    m[k] = sv;
+    el.style.setProperty(k, sv);
   };
+  const flag = (k, v) => { if (html.dataset[k] !== v) html.dataset[k] = v; };
+  const top = (el) => el.getBoundingClientRect().top + window.scrollY;
+  const live = () => E.live;
   function measure() {
-    const V = window.innerHeight;
-    E.V = V;
-    html.style.setProperty('--V', V + 'px');
+    const W = window.innerWidth, Vn = window.innerHeight;
+    if (!coarse || !E.w || W !== E.w || Math.abs(Vn - E.V) > 160) {
+      E.V = Vn;
+      html.style.setProperty('--V', Vn + 'px');
+    }
+    E.w = W;
     const sp = rbSpeed();
     rbs.forEach((rb) => {
       const cp = $('.rb-in', rb);
       if (cp && cp.offsetWidth) rb.style.setProperty('--rbd', (cp.offsetWidth / sp).toFixed(2) + 's');
     });
     const sv = $('.bd-svg');
-    if (sv) {
+    if (sv && elBold) {
       let ux = 1000, uy = 560;
       try {
         const t = $('.bd-dal', sv);
         const exr = t && t.getExtentOfChar ? t.getExtentOfChar(2) : null;
         if (exr && exr.width > 0) { ux = exr.x + exr.width * 0.32; uy = exr.y + exr.height * 0.55; }
       } catch (err) { /* estimate */ }
-      const W = sv.clientWidth, H = sv.clientHeight, k = Math.min(W / 1440, H / 900);
-      html.style.setProperty('--mox', ((W - 1440 * k) / 2 + ux * k) + 'px');
-      html.style.setProperty('--moy', ((H - 900 * k) / 2 + uy * k) + 'px');
+      const SW = sv.clientWidth, SH = sv.clientHeight, k = Math.min(SW / 1440, SH / 900);
+      elBold.style.setProperty('--mox', ((SW - 1440 * k) / 2 + ux * k) + 'px');
+      elBold.style.setProperty('--moy', ((SH - 900 * k) / 2 + uy * k) + 'px');
     }
-  }
-  function tick() {
-    if (!live()) {
-      const V = E.V;
-      [['--pg', 0], ['--pc', 1], ['--cl', 0.12], ['--cs', 0.12], ['--bd', 0.6], ['--dly', 0], ['--d1y', -V * 0.3], ['--d1s', 0.5], ['--d1o', 1], ['--mz', 1], ['--dz', 0], ['--cp1', 0.3], ['--cp2', 0.3], ['--cp3', 0.3], ['--cp4', 0.3]].forEach(([k, v]) => set(k, v));
-      html.dataset.cl = 'in'; html.dataset.cta = 'in'; html.dataset.ig = 'in';
-      return;
+    const se = document.scrollingElement || html;
+    E.live = !reduce && se.scrollHeight > window.innerHeight + 4;
+    if (elClub) {
+      const an = $('.cl-anim', elClub), pw = $('.pg-wrap', elClub);
+      G.club = { t: top(elClub), h: elClub.offsetHeight, an: an ? top(an) : null, pw: pw ? { t: top(pw), h: pw.offsetHeight } : null };
     }
-    const V = E.V, y = window.scrollY;
-    const club = document.getElementById('kulup');
-    if (club) {
-      const t = top(club), H = club.offsetHeight;
-      set('--cl', cl((y - t + V) / H));
-      const an = $('.cl-anim', club);
-      if (an && an.getBoundingClientRect().top < V / 2) html.dataset.cl = 'in';
-      const pw = $('.pg-wrap', club);
-      if (pw) {
-        const p = cl((y - top(pw) + V) / pw.offsetHeight);
-        set('--pg', p);
-        set('--pc', cl((p - 0.75) / 0.15));
-        if (p > 0.5) html.dataset.cta = 'in';
-      }
-    }
-    const bold = $('.bold');
-    if (bold) {
-      const bd = (y - top(bold)) / V;
-      const e1 = 1 - Math.pow(1 - cl(bd), 3);
-      const a2 = cl((bd - 1.3) / 2.3);
-      set('--bd', bd);
-      set('--dly', 700 * (1 - e1));
-      set('--d1y', -V * 0.34 * e1);
-      set('--d1s', 1 - 0.5 * e1);
-      set('--d1o', 1 - cl((bd - 1.3) / 0.4));
-      set('--mz', 1 + 79 * a2 * a2 * a2);
-      set('--dz', a2);
-      E.mdNow = a2 > 0.6 ? 1 : 0;
-    }
-    const cls = document.getElementById('dersler');
-    if (cls) {
-      const t = top(cls), H = cls.offsetHeight;
-      set('--cs', cl((y - t + V) / H));
-      const grid = $('.cls-grid', cls);
-      const gb = grid ? top(grid) + grid.offsetHeight : t + H;
-      $$('.cc', cls).forEach((c, i) => {
-        const st = top(c) - V;
-        set('--cp' + (i + 1), cl((y - st) / Math.max(1, gb - st)));
-      });
+    if (elBold) G.bold = { t: top(elBold) };
+    if (elCls) {
+      const t = top(elCls), h = elCls.offsetHeight, grid = $('.cls-grid', elCls);
+      G.cls = { t, h, gb: grid ? top(grid) + grid.offsetHeight : t + h, cards: $$('.cc', elCls).map(top) };
     }
     const ig = $('.ig-grid');
-    if (ig && ig.getBoundingClientRect().top < V) html.dataset.ig = 'in';
-    const probe = V - 50;
+    G.ig = ig ? top(ig) : null;
+    G.ints = $$('[data-int]').map((s) => { const t = top(s); return { t, b: t + s.offsetHeight, bold: s.classList.contains('bold') }; });
+  }
+  function tick() {
+    const V = E.V, y = window.scrollY;
+    if (!E.live) {
+      [['--pg', 0], ['--pc', 1], ['--cl', 0.12]].forEach(([k, v]) => set(elClub, k, v));
+      [['--bd', 0.6], ['--dly', 0], ['--d1y', -V * 0.3], ['--d1s', 0.5], ['--d1o', 1], ['--mz', 1], ['--dz', 0]].forEach(([k, v]) => set(elBold, k, v));
+      [['--cs', 0.12], ['--cp1', 0.3], ['--cp2', 0.3], ['--cp3', 0.3], ['--cp4', 0.3]].forEach(([k, v]) => set(elCls, k, v));
+      if (elCta) elCta.classList.add('on');
+      flag('cl', 'in'); flag('cta', 'in'); flag('ig', 'in');
+      return;
+    }
+    const C = G.club;
+    if (C) {
+      set(elClub, '--cl', cl((y - C.t + V) / C.h));
+      if (C.an !== null && C.an - y < V / 2) flag('cl', 'in');
+      if (C.pw) {
+        const p = cl((y - C.pw.t + V) / C.pw.h), pc = cl((p - 0.75) / 0.15);
+        set(elClub, '--pg', p);
+        set(elClub, '--pc', pc);
+        if (p > 0.5) flag('cta', 'in');
+        // the CTA buttons only take clicks once they are actually showing
+        if (elCta && elCta.classList.contains('on') !== pc > 0.05) elCta.classList.toggle('on', pc > 0.05);
+      }
+    }
+    if (G.bold) {
+      const bd = (y - G.bold.t) / V;
+      const e1 = 1 - Math.pow(1 - cl(bd), 3);
+      const a2 = cl((bd - 1.3) / 2.3);
+      set(elBold, '--bd', bd);
+      set(elBold, '--dly', 700 * (1 - e1));
+      set(elBold, '--d1y', -V * 0.34 * e1);
+      set(elBold, '--d1s', 1 - 0.5 * e1);
+      set(elBold, '--d1o', 1 - cl((bd - 1.3) / 0.4));
+      set(elBold, '--mz', 1 + 79 * a2 * a2 * a2);
+      set(elBold, '--dz', a2);
+      E.mdNow = a2 > 0.6 ? 1 : 0;
+    }
+    const K = G.cls;
+    if (K) {
+      set(elCls, '--cs', cl((y - K.t + V) / K.h));
+      K.cards.forEach((ct, i) => {
+        const st = ct - V;
+        set(elCls, '--cp' + (i + 1), cl((y - st) / Math.max(1, K.gb - st)));
+      });
+    }
+    if (G.ig !== null && G.ig - y < V) flag('ig', 'in');
+    const probe = y + V - 50;
     let dark = false;
-    $$('[data-int]').forEach((s) => {
-      const r = s.getBoundingClientRect();
-      if (r.top <= probe && r.bottom >= probe) dark = !(s.classList.contains('bold') && E.mdNow > 0.5);
-    });
-    html.dataset.pill = dark ? 'dark' : 'light';
-    html.dataset.hdr = y > V * 0.8 ? 'hide' : 'show';
+    G.ints.forEach((s) => { if (s.t <= probe && s.b >= probe) dark = !(s.bold && E.mdNow > 0.5); });
+    flag('pill', dark ? 'dark' : 'light');
+    flag('hdr', y > V * 0.8 ? 'hide' : 'show');
   }
   let raf = 0;
   const onScroll = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; tick(); }); };
   window.addEventListener('scroll', onScroll, { passive: true });
-  window.addEventListener('resize', () => { measure(); tick(); });
+  let rz = 0;
+  const remeasure = () => { if (!rz) rz = requestAnimationFrame(() => { rz = 0; measure(); tick(); }); };
+  window.addEventListener('resize', remeasure);
+  // images and fonts arriving change section heights: keep the cached positions right
+  if (window.ResizeObserver) new ResizeObserver(remeasure).observe(document.body);
 
   /* smooth wheel scrolling (Lenis-like, lerp 0.1) + smooth anchor jumps */
   const sm = { target: 0, cur: 0, run: false, last: 0, anim: null };
@@ -299,7 +351,7 @@
      this keeps the keyboard inside it, so the real photos are shown at full quality. */
   const tour = $('.tour'), frame = tour ? $('.tour-frame', tour) : null;
   const tGo = tour ? $('.tour-go', tour) : null, tFs = tour ? $('.tour-fs', tour) : null;
-  let tourOpen = false, tourReady = false, tourLive = false, tourBack = null;
+  let tourOpen = false, tourReady = false, tourLive = false, tourBack = null, tourPushed = false;
   const walkKey = (k) => /^(Arrow(Up|Down|Left|Right)|[wasdWASD])$/.test(k);
   function tourSync() {
     if (tour) tour.classList.toggle('away', tourOpen && tourLive && document.activeElement !== frame);
@@ -313,6 +365,7 @@
     if (!tourReady || tourLive) return;
     tourLive = true;
     tour.classList.add('live');
+    frame.removeAttribute('tabindex');
     tourFocus();
   }
   function setTour(open) {
@@ -328,24 +381,34 @@
           if (tGo) { tGo.disabled = false; if (tourOpen && !tourLive) tGo.focus({ preventScroll: true }); }
         }, 1500), { once: true });
         frame.setAttribute('src', frame.dataset.src);
+        // no answer from Matterport: say so and offer the tour in a new tab instead of spinning forever
+        setTimeout(() => { if (!tourReady) tour.classList.add('fail'); }, 15000);
       }
       tour.removeAttribute('inert');
       tour.setAttribute('aria-hidden', 'false');
       tour.classList.add('open');
       html.classList.add('tour-on');
+      // keep keyboard focus inside the dialog: the page behind it is inert while it is open
+      [...tour.parentElement.children].forEach((el) => { if (el !== tour) el.inert = true; });
       sm.anim = null; sm.run = false;
       setTimeout(() => {
         if (tourLive) tourFocus();
         else (tGo && !tGo.disabled ? tGo : $('.tour-x', tour)).focus({ preventScroll: true });
       }, 80);
-      if (location.hash !== '#tur') history.replaceState(null, '', '#tur');
+      // a history entry, so the phone's Back button closes the tour instead of leaving the site
+      if (location.hash !== '#tur') { history.pushState({ tour: 1 }, '', '#tur'); tourPushed = true; }
     } else {
       if (document.fullscreenElement === tour && document.exitFullscreen) document.exitFullscreen().catch(() => {});
       tour.classList.remove('open');
       tour.setAttribute('aria-hidden', 'true');
       tour.setAttribute('inert', '');
       html.classList.remove('tour-on');
-      if (location.hash === '#tur') history.replaceState(null, '', location.pathname + location.search);
+      [...tour.parentElement.children].forEach((el) => { if (el !== tour) el.inert = false; });
+      if (location.hash === '#tur') {
+        if (tourPushed) history.back();
+        else history.replaceState(null, '', location.pathname + location.search);
+      }
+      tourPushed = false;
       window.focus();
       if (tourBack && tourBack.focus) tourBack.focus({ preventScroll: true });
     }
@@ -379,6 +442,7 @@
       if (!tourLive) tourStart(); else tourFocus();
     });
     if (location.hash === '#tur') setTour(true);
+    window.addEventListener('hashchange', () => setTour(location.hash === '#tur'));
   }
 
   measure(); tick();
