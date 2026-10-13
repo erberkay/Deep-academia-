@@ -480,3 +480,6 @@ html.tour-on{overflow:hidden}
 /* ---------- hero scene bullets: in the free strip under the header, visible on the first screen
    (they sat below the fold, behind the floating pill nav) ---------- */
 .hero .buls{top:30px;bottom:auto}
+
+/* ---------- phones: fewer repaints while scrolling ---------- */
+@media (pointer:coarse){.plate{filter:none}.ccard{will-change:transform}}

@@ -77,8 +77,11 @@
   /* band letters roll once the band has opened: .fa chars squash down while .fb chars grow
      (stagger .1s, expo.inOut 2s, yoyo) */
   const flips = new Map();
+  // phones and tablets skip the letter roll: ~190 separately animated letters per band each get their own
+  // compositor layer, which made scrolling stutter on phones (257 layers at the top of the page vs 88)
+  const lightHero = !!(window.matchMedia && window.matchMedia('(pointer: coarse), (max-width: 900px)').matches);
   function flipOn(i) {
-    if (reduce || flips.has(i) || !rbs[i]) return;
+    if (reduce || lightHero || flips.has(i) || !rbs[i]) return;
     const ex = 'cubic-bezier(0.87, 0, 0.13, 1)', list = [];
     $$('.rb-title', rbs[i]).forEach((t) => {
       const fa = $$('.fa .c', t), fb = $$('.fb .c', t);
@@ -276,7 +279,8 @@
       }
     }
     if (G.bold) {
-      const bd = (y - G.bold.t) / V;
+      // clamped: outside the section the value stops changing, so the section is not restyled while away
+      const bd = Math.max(-1.2, Math.min(5.2, (y - G.bold.t) / V));
       const e1 = 1 - Math.pow(1 - cl(bd), 3);
       const a2 = cl((bd - 1.3) / 2.3);
       set(elBold, '--bd', bd);
