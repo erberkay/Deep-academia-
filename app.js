@@ -689,7 +689,8 @@
     if (!el || isOpen(el) === on) return;
     el.classList.toggle('open', on);
     el.setAttribute('aria-hidden', on ? 'false' : 'true');
-    if (on) { el.removeAttribute('inert'); if (menuOpen) setMenu(false); ensureData(); } else el.setAttribute('inert', '');
+    // a fresh open starts at the top (returning to the timetable from a class keeps its place: it never closed)
+    if (on) { el.removeAttribute('inert'); $('.ovl-body', el).scrollTop = 0; if (menuOpen) setMenu(false); ensureData(); } else el.setAttribute('inert', '');
   }
   function route() {
     const h = location.hash || '';
