@@ -214,7 +214,7 @@ a{color:#D6FB00}a:hover{color:#ffffff}
 .cont.top{clip-path:polygon(0 0,100% 0,100% 50%,0 50%);transform:translateY(calc(var(--gap) * -1))}
 .cont.bot{clip-path:polygon(0 50%,100% 50%,100% 100%,0 100%);transform:translateY(var(--gap))}
 .rb.cur.band .cont,.rb.leave .cont{transform:translateY(0)}
-.rb-title{display:grid;font-family:Anton,Kanit,sans-serif;font-size:270px;line-height:1;font-weight:400;letter-spacing:-.01em;text-transform:uppercase;white-space:nowrap;padding-left:max(29px,calc(29px + 4.76vw))}
+.rb-title{display:grid;font-family:Anton,Kanit,sans-serif;font-size:204px;line-height:1.2;font-weight:400;letter-spacing:-.01em;text-transform:uppercase;white-space:nowrap;padding-left:max(29px,calc(29px + 4.76vw))}
 .rb-title>span{grid-area:1/1;display:block}
 .rb-title .c{display:inline-block}
 .rb-title .fa .c{transform-origin:50% 100%}
@@ -239,8 +239,8 @@ a{color:#D6FB00}a:hover{color:#ffffff}
 .hdr{animation:hdrIn 1.1s var(--ease) 1.2s both}
 @keyframes hdrIn{from{transform:translateY(-100%);opacity:0}to{transform:none;opacity:1}}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-@media (max-width:900px){.hero{--band:220px}.rb-title{font-size:190px}.rb-sub{font-size:22px}}
-@media (max-width:600px){.hero{--band:170px}.rb-title{font-size:140px}.rb-ctas{display:none}}
+@media (max-width:900px){.hero{--band:220px}.rb-title{font-size:150px}.rb-sub{font-size:22px}}
+@media (max-width:600px){.hero{--band:170px}.rb-title{font-size:114px}.rb-ctas{display:none}}
 .rb.first .cont{transition:none}
 
 /* ---------- roll-over labels ---------- */
