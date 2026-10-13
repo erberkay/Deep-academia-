@@ -53,10 +53,28 @@ function demoPano(label, w = 2048) {
   });
   return c;
 }
+// Synthetic cube faces for checking face orientation: a letter, an arrow to the image top and edge labels.
+const FACE_NAMES = { f: 'ÖN', r: 'SAĞ', b: 'ARKA', l: 'SOL', u: 'TAVAN', d: 'ZEMİN' };
+function demoFace(face, label, w = 512) {
+  const c = document.createElement('canvas'); c.width = c.height = w;
+  const g = c.getContext('2d');
+  g.fillStyle = { f: '#2b3e55', r: '#3c2b55', b: '#553b2b', l: '#2b5540', u: '#454545', d: '#3a2f22' }[face];
+  g.fillRect(0, 0, w, w);
+  g.strokeStyle = '#D6FB00'; g.lineWidth = 6; g.strokeRect(3, 3, w - 6, w - 6);
+  g.fillStyle = '#ffffff'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.font = `bold ${w / 6}px system-ui`; g.fillText(FACE_NAMES[face], w / 2, w / 2);
+  g.font = `bold ${w / 14}px system-ui`; g.fillText(label, w / 2, w * 0.66);
+  g.fillText('▲ ÜST', w / 2, w * 0.08);
+  g.save(); g.translate(w * 0.92, w / 2); g.rotate(Math.PI / 2); g.fillText('SAĞ KENAR', 0, 0); g.restore();
+  return c;
+}
+const cubeMode = new URLSearchParams(location.search).has('cube');
 const nodes = [];
 for (let r = 0; r < 4; r++) for (let q = 0; q < 3; q++) {
   const id = 'N' + r + q;
-  nodes.push({ id, canvas: demoPano(id), pos: [q * 2.5, 0, -r * 2.5], heading: 0 });
+  nodes.push(cubeMode
+    ? { id, canvases: ['f', 'r', 'b', 'l', 'u', 'd'].map((f) => demoFace(f, id)), pos: [q * 2.5, 0, -r * 2.5], heading: 0 }
+    : { id, canvas: demoPano(id), pos: [q * 2.5, 0, -r * 2.5], heading: 0 });
 }
 
 const root = document.getElementById('wk'), info = document.getElementById('info');

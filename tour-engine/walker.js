@@ -1,19 +1,27 @@
 /* Deep Academia — panorama walker.
-   Walk a set of real 360° photos with the keyboard like a game character:
+   Walk real 360° captures with the keyboard like a game character:
    ↑/W forward, ↓/S back, ←/→ (or Q/E) turn, A/D side-step; hold a key to keep going.
-   Each capture point shows its photo at full quality; moving between points glides the camera
-   from one photo sphere to the next while crossfading, so it feels like walking.
+   Each capture point shows its photos at full quality; moving between points glides the camera from one
+   photo cube/sphere to the next while crossfading, so it feels like walking.
 
-   Data (tour.json):
+   tour.json
    {
-     "start": "p01",
+     "start": "p01", "startYaw": 0,
+     "sizes": [1024, 2048],                       // cube face sizes on the server (smallest first)
      "nodes": [
-       { "id": "p01", "src": "panos/p01.jpg", "pos": [x, y, z],   // metres, y up (optional)
-         "heading": 0,                                         // radians: world yaw the photo centre faces
-         "links": ["p02", "p05"] }                             // optional; computed from positions if omitted
+       { "id": "p01",
+         "cube": "cubes/p01/{size}/{face}.jpg",     // faces f r b l u d (see FACES below), or:
+         "src": "panos/p01.jpg",                    // a 2:1 equirectangular photo instead
+         "pos": [x, y, z],                          // metres, y up, forward/north = -Z (optional)
+         "heading": 0,                              // radians: world yaw the front face / photo centre faces
+         "links": ["p02"] }                         // optional; computed from positions when omitted
      ]
    }
-   Without positions every link needs a direction: "links": [{ "to": "p02", "yaw": 1.57 }]. */
+   Without positions every link needs a direction: "links": [{ "to": "p02", "yaw": 1.57 }].
+
+   Cube faces (canonical, as seen from inside): f = front, r = right, b = back, l = left — upright;
+   u = looking up while facing front (front edge at the bottom of the image);
+   d = looking down while facing front (front edge at the top of the image). */
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
 
 const TAU = Math.PI * 2;
@@ -22,7 +30,7 @@ const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 const smooth = (a, b, t) => { const x = clamp((t - a) / (b - a), 0, 1); return x * x * (3 - 2 * x); };
 
-const SPHERE_R = 8;          // metres: distance the photo is projected at
+const R = 8;                 // metres: distance the photos are projected at (sphere radius / half cube size)
 const LINK_MAX = 6;          // metres: farthest neighbour auto-linked from positions
 const CONE = 0.75;           // radians (~43°): how far off-axis a step may go
 const TURN_SPEED = 1.9;      // rad/s at full turn
@@ -31,6 +39,55 @@ const MOVE_KEYS = {
   ArrowUp: 'fwd', KeyW: 'fwd', ArrowDown: 'back', KeyS: 'back',
   KeyA: 'left', KeyD: 'right', ArrowLeft: 'turnL', ArrowRight: 'turnR', KeyQ: 'turnL', KeyE: 'turnR',
 };
+export const FACES = ['f', 'r', 'b', 'l', 'u', 'd'];
+// BoxGeometry material slots: 0 +X, 1 -X, 2 +Y, 3 -Y, 4 +Z, 5 -Z. With heading 0 the front faces -Z.
+// The box is seen from inside (BackSide), which mirrors every face: un-mirror, and turn u/d so their
+// "front" edge meets the front face.
+const SLOT = {
+  f: { i: 5, rot: 0 }, r: { i: 0, rot: 0 }, b: { i: 4, rot: 0 }, l: { i: 1, rot: 0 },
+  u: { i: 2, rot: Math.PI }, d: { i: 3, rot: Math.PI },
+};
+
+/* one projection surface (sphere for equirect photos, inside-out box for cube faces) */
+class Pano {
+  constructor(scene, order) {
+    const sg = new THREE.SphereGeometry(R, 96, 64);
+    sg.scale(-1, 1, 1);
+    this.sphere = new THREE.Mesh(sg, new THREE.MeshBasicMaterial({ transparent: true, depthTest: false, depthWrite: false }));
+    this.box = new THREE.Mesh(new THREE.BoxGeometry(2 * R, 2 * R, 2 * R),
+      Array.from({ length: 6 }, () => new THREE.MeshBasicMaterial({ side: THREE.BackSide, transparent: true, depthTest: false, depthWrite: false })));
+    [this.sphere, this.box].forEach((m) => { m.renderOrder = order; m.visible = false; scene.add(m); });
+    this.node = null;
+  }
+  set order(o) { this.sphere.renderOrder = o; this.box.renderOrder = o; }
+  set opacity(v) {
+    this.sphere.material.opacity = v;
+    this.box.material.forEach((m) => { m.opacity = v; });
+  }
+  hide() { this.sphere.visible = false; this.box.visible = false; this.node = null; }
+  show(n, tex) {
+    this.node = n;
+    const p = n.pos || new THREE.Vector3();
+    if (tex.faces) {
+      FACES.forEach((f, k) => {
+        const m = this.box.material[SLOT[f].i];
+        m.map = tex.faces[k];
+        m.needsUpdate = true;
+      });
+      this.box.position.copy(p);
+      this.box.rotation.y = n.heading;
+      this.box.visible = true; this.sphere.visible = false;
+    } else {
+      this.sphere.material.map = tex.tex;
+      this.sphere.material.needsUpdate = true;
+      this.sphere.position.copy(p);
+      // three.js maps the image centre to local -X (yaw 90°): turn it to face the node heading
+      this.sphere.rotation.y = n.heading - Math.PI / 2;
+      this.sphere.visible = true; this.box.visible = false;
+    }
+  }
+  moveTo(p) { this.sphere.position.copy(p); this.box.position.copy(p); }
+}
 
 export class Walker {
   constructor(root, opts = {}) {
@@ -38,9 +95,10 @@ export class Walker {
     this.opts = opts;
     this.keys = new Set();
     this.yaw = 0; this.pitch = 0; this.turnVel = 0; this.fov = 75;
-    this.cur = null; this.move = null; this.bump = 0;
+    this.cur = null; this.move = null; this.bump = 0; this.queued = null;
     this.cache = new Map(); this.loading = new Map();
     this.onChange = opts.onChange || (() => {});
+    this.coarse = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -54,19 +112,15 @@ export class Walker {
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(this.fov, 1, 0.05, 100);
     this.camera.rotation.order = 'YXZ';
-    const geo = new THREE.SphereGeometry(SPHERE_R, 96, 64);
-    geo.scale(-1, 1, 1);
-    const mk = (order) => {
-      const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ transparent: true, opacity: 1, depthTest: false, depthWrite: false }));
-      m.renderOrder = order; m.visible = false; this.scene.add(m); return m;
-    };
-    this.sphA = mk(0); this.sphB = mk(1);
+    this.A = new Pano(this.scene, 0);
+    this.B = new Pano(this.scene, 1);
 
     this.maxTex = this.renderer.capabilities.maxTextureSize;
     this.aniso = this.renderer.capabilities.getMaxAnisotropy();
     this.bind();
     this.resize();
     this.last = performance.now();
+    this.idleSince = performance.now();
     this.raf = requestAnimationFrame((t) => this.frame(t));
   }
 
@@ -74,19 +128,24 @@ export class Walker {
   async load(url) {
     const res = await fetch(url, { cache: 'no-cache' });
     if (!res.ok) throw new Error('tour.json ' + res.status);
-    this.setData(await res.json(), new URL(url, location.href));
+    return this.setData(await res.json(), new URL(url, location.href));
   }
   setData(data, base = new URL(location.href)) {
     this.base = base;
+    const sizes = (data.sizes || [1024]).slice().sort((a, b) => a - b);
+    // phones start every point at the small size and sharpen the one you stand on; desktops use the larger one
+    const fit = (want) => sizes.filter((s) => s <= Math.min(want, this.maxTex)).pop() || sizes[0];
+    this.lowSize = this.coarse ? fit(1024) : fit(2048);
+    this.highSize = fit(2048);
     this.nodes = new Map();
     data.nodes.forEach((n) => this.nodes.set(n.id, { ...n, pos: n.pos ? new THREE.Vector3(...n.pos) : null, heading: n.heading || 0 }));
     this.hasPos = [...this.nodes.values()].every((n) => n.pos);
-    this.nodes.forEach((n) => { n.edges = this.edgesOf(n, data); });
+    this.nodes.forEach((n) => { n.edges = this.edgesOf(n); });
     const start = this.nodes.get(data.start) || this.nodes.values().next().value;
     if (typeof data.startYaw === 'number') this.yaw = data.startYaw;
     return this.goto(start.id, { instant: true });
   }
-  edgesOf(n, data) {
+  edgesOf(n) {
     // each edge: { to, yaw (world bearing), dist }
     const out = [];
     const add = (id, yaw) => {
@@ -97,74 +156,98 @@ export class Walker {
         out.push({ to: id, yaw: Math.atan2(-d.x, -d.z), dist: Math.hypot(d.x, d.z) });
       } else if (typeof yaw === 'number') out.push({ to: id, yaw, dist: 2.5 });
     };
-    if (n.links && n.links.length) n.links.forEach((l) => (typeof l === 'string' ? add(l) : add(l.to, l.yaw)));
-    else if (this.hasPos) {
-      this.nodes.forEach((m) => {
-        if (m === n || Math.abs(m.pos.y - n.pos.y) > 1.2) return;
-        const dist = Math.hypot(m.pos.x - n.pos.x, m.pos.z - n.pos.z);
-        if (dist <= LINK_MAX) add(m.id);
-      });
-      // keep the nearest neighbour per ~30° sector so steps are short and natural
-      out.sort((a, b) => a.dist - b.dist);
-      const kept = [];
-      out.forEach((e) => { if (!kept.some((k) => Math.abs(wrap(k.yaw - e.yaw)) < 0.5)) kept.push(e); });
-      return kept;
-    }
-    return out;
+    if (n.links && n.links.length) { n.links.forEach((l) => (typeof l === 'string' ? add(l) : add(l.to, l.yaw))); return out; }
+    if (!this.hasPos) return out;
+    this.nodes.forEach((m) => {
+      if (m === n || Math.abs(m.pos.y - n.pos.y) > 1.2) return;
+      if (Math.hypot(m.pos.x - n.pos.x, m.pos.z - n.pos.z) <= LINK_MAX) add(m.id);
+    });
+    // keep the nearest neighbour per ~30° sector so steps are short and natural
+    out.sort((a, b) => a.dist - b.dist);
+    const kept = [];
+    out.forEach((e) => { if (!kept.some((k) => Math.abs(wrap(k.yaw - e.yaw)) < 0.5)) kept.push(e); });
+    return kept;
   }
 
   /* ---------- textures ---------- */
-  texture(id) {
-    if (this.cache.has(id)) return Promise.resolve(this.cache.get(id));
-    if (this.loading.has(id)) return this.loading.get(id);
-    const n = this.nodes.get(id);
-    const p = new Promise((resolve, reject) => {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.decoding = 'async';
-      img.onload = () => {
-        let source = img;
-        if (img.naturalWidth > this.maxTex) {           // phones: scale 8K photos down to what the GPU takes
-          const c = document.createElement('canvas');
-          c.width = this.maxTex; c.height = this.maxTex / 2;
-          c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-          source = c;
-        }
+  image(url, canvas, maxSide) {
+    return new Promise((resolve, reject) => {
+      const done = (source) => {
         const t = new THREE.Texture(source);
         t.colorSpace = THREE.SRGBColorSpace;
         t.anisotropy = this.aniso;
         t.minFilter = THREE.LinearMipmapLinearFilter;
         t.generateMipmaps = true;
         t.needsUpdate = true;
-        this.cache.set(id, t);
-        this.loading.delete(id);
-        this.trim();
         resolve(t);
       };
-      img.onerror = () => { this.loading.delete(id); reject(new Error('pano ' + id)); };
-      img.src = n.canvas ? n.canvas.toDataURL('image/jpeg', 0.92) : new URL(n.src, this.base).href;
+      if (canvas) { done(canvas); return; }
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.decoding = 'async';
+      img.onload = () => {
+        if (img.naturalWidth <= maxSide) { done(img); return; }
+        // GPU limit (phones): scale down instead of failing
+        const c = document.createElement('canvas');
+        const k = maxSide / img.naturalWidth;
+        c.width = maxSide; c.height = Math.round(img.naturalHeight * k);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        done(c);
+      };
+      img.onerror = () => reject(new Error('image ' + url));
+      img.src = url;
     });
-    this.loading.set(id, p);
+  }
+  texture(id, size = this.lowSize) {
+    const n = this.nodes.get(id);
+    const key = id + '@' + (n.cube ? size : 'eq');
+    if (this.cache.has(key)) return Promise.resolve(this.cache.get(key));
+    if (this.loading.has(key)) return this.loading.get(key);
+    let p;
+    if (n.cube || n.canvases) {
+      p = Promise.all(FACES.map((f, k) => this.image(
+        n.canvases ? null : new URL(n.cube.replace('{size}', size).replace('{face}', f), this.base).href,
+        n.canvases ? n.canvases[k] : null, this.maxTex)))
+        .then((faces) => {
+          // the box shows faces from inside, which mirrors them: flip back, and turn u/d into place
+          faces.forEach((t, k) => {
+            const s = SLOT[FACES[k]];
+            t.center.set(0.5, 0.5);
+            t.repeat.set(-1, 1);
+            t.wrapS = THREE.RepeatWrapping;
+            t.rotation = s.rot;
+          });
+          return { faces, size };
+        });
+    } else {
+      p = this.image(n.canvas ? null : new URL(n.src, this.base).href, n.canvas || null, this.maxTex).then((tex) => ({ tex }));
+    }
+    p = p.then((t) => { this.cache.set(key, t); this.loading.delete(key); this.trim(); return t; },
+      (e) => { this.loading.delete(key); throw e; });
+    this.loading.set(key, p);
     return p;
   }
   trim() {
-    const keep = new Set([this.cur && this.cur.id, this.move && this.move.to.id]);
-    if (this.cur) this.cur.edges.forEach((e) => keep.add(e.to));
-    for (const [id, t] of this.cache) {
-      if (this.cache.size <= 14) break;
-      if (!keep.has(id)) { t.dispose(); this.cache.delete(id); }
+    const keep = new Set();
+    [this.cur, this.move && this.move.to].forEach((n) => { if (n) { keep.add(n.id + '@' + this.lowSize); keep.add(n.id + '@' + this.highSize); keep.add(n.id + '@eq'); } });
+    if (this.cur) this.cur.edges.forEach((e) => { keep.add(e.to + '@' + this.lowSize); keep.add(e.to + '@eq'); });
+    for (const [key, t] of this.cache) {
+      if (this.cache.size <= 12) break;
+      if (keep.has(key)) continue;
+      (t.faces || [t.tex]).forEach((x) => x.dispose());
+      this.cache.delete(key);
     }
   }
   preload(n) { n.edges.forEach((e) => this.texture(e.to).catch(() => {})); }
-
-  /* ---------- placing a photo sphere ---------- */
-  place(mesh, n, tex) {
-    mesh.material.map = tex;
-    mesh.material.needsUpdate = true;
-    mesh.position.copy(n.pos || new THREE.Vector3());
-    // three.js maps the image centre to local -X (yaw 90°): turn it to face the node heading
-    mesh.rotation.y = n.heading - Math.PI / 2;
-    mesh.visible = true;
+  // standing still: swap the current point to the sharper faces
+  async sharpen() {
+    const n = this.cur;
+    if (!n || !n.cube || this.highSize === this.lowSize || this.sharpening === n.id) return;
+    this.sharpening = n.id;
+    try {
+      const t = await this.texture(n.id, this.highSize);
+      if (this.cur === n && !this.move && this.A.node === n) this.A.show(n, t);
+    } catch (e) { /* keep the low size */ }
   }
 
   async goto(id, { instant = false } = {}) {
@@ -173,12 +256,13 @@ export class Walker {
     const tex = await this.texture(id);
     if (instant || !this.cur) {
       this.cur = n;
-      this.place(this.sphA, n, tex);
-      this.sphA.material.opacity = 1;
-      this.sphB.visible = false;
+      this.A.show(n, tex);
+      this.A.opacity = 1;
+      this.B.hide();
       this.camera.position.copy(n.pos || new THREE.Vector3());
       this.preload(n);
       this.onChange(n);
+      this.idleSince = performance.now();
       return;
     }
     this.startMove(n, tex, null);
@@ -211,28 +295,28 @@ export class Walker {
   startMove(n, tex, edge) {
     const from = this.cur;
     const dist = edge ? edge.dist : (from.pos && n.pos ? from.pos.distanceTo(n.pos) : 2.5);
-    this.place(this.sphB, n, tex);
-    this.sphB.material.opacity = 0;
-    const chain = this.move && this.move.chained;
+    this.B.show(n, tex);
+    this.B.opacity = 0;
     this.move = {
       from, to: n, t0: performance.now(),
-      dur: clamp(520 + dist * 210, 650, 1500) * (this.keys.size ? 0.9 : 1),
+      dur: clamp(520 + dist * 210, 650, 1500) * (STEP_DIRS.some((d) => this.keys.has(d)) ? 0.9 : 1),
       p0: (from.pos || new THREE.Vector3()).clone(),
       p1: (n.pos || new THREE.Vector3()).clone(),
       // without positions fake the glide 2.5 m along the link direction
       fake: !(from.pos && n.pos) && edge ? edge.yaw : null,
-      chained: chain,
     };
   }
   finishMove() {
     const n = this.move.to;
-    // swap: the arrived photo becomes the base sphere
-    const a = this.sphA; this.sphA = this.sphB; this.sphB = a;
-    this.sphA.renderOrder = 0; this.sphB.renderOrder = 1;
-    this.sphA.material.opacity = 1; this.sphB.visible = false;
-    this.camera.position.copy(n.pos || new THREE.Vector3());
-    this.sphA.position.copy(n.pos || new THREE.Vector3());
+    // swap: the arrived photos become the base layer
+    const a = this.A; this.A = this.B; this.B = a;
+    this.A.order = 0; this.B.order = 1;
+    this.A.opacity = 1; this.B.hide();
+    const p = n.pos || new THREE.Vector3();
+    this.camera.position.copy(p);
+    this.A.moveTo(p);
     this.cur = n; this.move = null;
+    this.idleSince = performance.now();
     this.preload(n);
     this.onChange(n);
     const q = this.queued; this.queued = null;
@@ -249,7 +333,7 @@ export class Walker {
     this.yaw = wrap(this.yaw + this.turnVel * dt);
     // walking: keep stepping while a move key is held
     if (!this.move && !this.pending) {
-      for (const d of ['fwd', 'back', 'left', 'right']) if (this.keys.has(d)) { this.step(d); break; }
+      for (const d of STEP_DIRS) if (this.keys.has(d)) { this.step(d); break; }
     }
     let fov = this.fov;
     if (this.move) {
@@ -259,12 +343,12 @@ export class Walker {
       if (m.fake !== null) {
         const f = new THREE.Vector3(-Math.sin(m.fake), 0, -Math.cos(m.fake));
         this.camera.position.copy(m.p0).addScaledVector(f, 2.5 * e);
-        this.sphB.position.copy(m.p0).addScaledVector(f, 2.5);
+        this.B.moveTo(m.p0.clone().addScaledVector(f, 2.5));
       } else this.camera.position.lerpVectors(m.p0, m.p1, e);
-      this.sphB.material.opacity = smooth(0.18, 0.82, t);
+      this.B.opacity = smooth(0.18, 0.82, t);
       fov = this.fov - 6 * Math.sin(Math.PI * t);       // a slight dolly-zoom while striding
       if (t >= 1) this.finishMove();
-    }
+    } else if (now - this.idleSince > 700) this.sharpen();
     if (this.bump > 0) { fov += 2.5 * this.bump; this.bump = Math.max(0, this.bump - dt * 4); }
     if (Math.abs(this.camera.fov - fov) > 0.01) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
     this.camera.rotation.y = this.yaw;
@@ -291,7 +375,7 @@ export class Walker {
     this.canvas.addEventListener('keydown', this.onKey);
     this.canvas.addEventListener('keyup', this.onKey);
     this.canvas.addEventListener('blur', this.onBlur);
-    // drag to look around (mouse and touch)
+    // drag to look around (mouse and touch); a tap walks toward the tapped direction
     let drag = null;
     this.canvas.addEventListener('pointerdown', (e) => {
       this.canvas.focus({ preventScroll: true });
@@ -308,7 +392,6 @@ export class Walker {
     });
     const up = (e) => {
       if (!drag || e.pointerId !== drag.id) return;
-      // a tap (no drag) walks toward the tapped direction
       if (!drag.moved) {
         const r = this.canvas.getBoundingClientRect();
         const nx = ((e.clientX - r.left) / r.width) * 2 - 1;
@@ -333,6 +416,7 @@ export class Walker {
     this.keys.add(dir);
     if (STEP_DIRS.includes(dir)) { if (this.move || this.pending) this.queued = dir; else this.step(dir); }
   }
+  look(yaw, pitch = 0) { this.yaw = wrap(yaw); this.pitch = clamp(pitch, -1.55, 1.55); }
   focus() { this.canvas.focus({ preventScroll: true }); }
   resize() {
     const w = this.root.clientWidth || 1, h = this.root.clientHeight || 1;
@@ -343,7 +427,7 @@ export class Walker {
   destroy() {
     cancelAnimationFrame(this.raf);
     this.ro.disconnect();
-    this.cache.forEach((t) => t.dispose());
+    this.cache.forEach((t) => (t.faces || [t.tex]).forEach((x) => x.dispose()));
     this.renderer.dispose();
     this.canvas.remove();
   }
