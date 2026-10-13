@@ -148,15 +148,22 @@ export class Walker {
   edgesOf(n) {
     // each edge: { to, yaw (world bearing), dist }
     const out = [];
-    const add = (id, yaw) => {
+    const add = (id, yaw, portal = false) => {
       const m = this.nodes.get(id);
       if (!m || m === n) return;
       if (this.hasPos) {
         const d = new THREE.Vector3().subVectors(m.pos, n.pos);
-        out.push({ to: id, yaw: Math.atan2(-d.x, -d.z), dist: Math.hypot(d.x, d.z) });
-      } else if (typeof yaw === 'number') out.push({ to: id, yaw, dist: 2.5 });
+        out.push({ to: id, yaw: Math.atan2(-d.x, -d.z), dist: Math.hypot(d.x, d.z), portal });
+      } else if (typeof yaw === 'number') out.push({ to: id, yaw, dist: 2.5, portal });
     };
-    if (n.links && n.links.length) { n.links.forEach((l) => (typeof l === 'string' ? add(l) : add(l.to, l.yaw))); return out; }
+    if (n.links && n.links.length) {
+      n.links.forEach((l) => (typeof l === 'string' ? add(l) : add(l.to, l.yaw, !!l.portal)));
+      // several links in one direction: keep the nearest per ~30° sector so steps stay short (portals always stay)
+      out.sort((a, b) => a.dist - b.dist);
+      const kept = [];
+      out.forEach((e) => { if (e.portal || !kept.some((k) => !k.portal && Math.abs(wrap(k.yaw - e.yaw)) < 0.5)) kept.push(e); });
+      return kept;
+    }
     if (!this.hasPos) return out;
     this.nodes.forEach((m) => {
       if (m === n || Math.abs(m.pos.y - n.pos.y) > 1.2) return;
@@ -297,7 +304,11 @@ export class Walker {
     const dist = edge ? edge.dist : (from.pos && n.pos ? from.pos.distanceTo(n.pos) : 2.5);
     this.B.show(n, tex);
     this.B.opacity = 0;
+    const portal = !!(edge && edge.portal);
+    // through a door into another room: no glide; the new room fades in around the viewer
+    if (portal) this.B.moveTo(from.pos || new THREE.Vector3());
     this.move = {
+      portal,
       from, to: n, t0: performance.now(),
       dur: clamp(520 + dist * 210, 650, 1500) * (STEP_DIRS.some((d) => this.keys.has(d)) ? 0.9 : 1),
       p0: (from.pos || new THREE.Vector3()).clone(),
@@ -340,14 +351,20 @@ export class Walker {
       const m = this.move;
       const t = clamp((now - m.t0) / m.dur, 0, 1);
       const e = ease(t);
-      if (m.fake !== null) {
+      if (m.portal) {
+        this.B.opacity = smooth(0.15, 0.85, t);
+        fov = this.fov - 12 * Math.sin(Math.PI * t);
+        if (t >= 1) this.finishMove();
+      } else if (m.fake !== null) {
         const f = new THREE.Vector3(-Math.sin(m.fake), 0, -Math.cos(m.fake));
         this.camera.position.copy(m.p0).addScaledVector(f, 2.5 * e);
         this.B.moveTo(m.p0.clone().addScaledVector(f, 2.5));
       } else this.camera.position.lerpVectors(m.p0, m.p1, e);
-      this.B.opacity = smooth(0.18, 0.82, t);
-      fov = this.fov - 6 * Math.sin(Math.PI * t);       // a slight dolly-zoom while striding
-      if (t >= 1) this.finishMove();
+      if (!m.portal) {
+        this.B.opacity = smooth(0.18, 0.82, t);
+        fov = this.fov - 6 * Math.sin(Math.PI * t);     // a slight dolly-zoom while striding
+        if (t >= 1) this.finishMove();
+      }
     } else if (now - this.idleSince > 700) this.sharpen();
     if (this.bump > 0) { fov += 2.5 * this.bump; this.bump = Math.max(0, this.bump - dt * 4); }
     if (Math.abs(this.camera.fov - fov) > 0.01) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
@@ -355,7 +372,7 @@ export class Walker {
     this.camera.rotation.x = this.pitch;
     this.renderer.render(this.scene, this.camera);
     if (this.opts.onFrame) this.opts.onFrame(this);
-    this.raf = requestAnimationFrame((t) => this.frame(t));
+    if (this.raf) this.raf = requestAnimationFrame((t) => this.frame(t));
   }
 
   /* ---------- input ---------- */
@@ -417,6 +434,9 @@ export class Walker {
     if (STEP_DIRS.includes(dir)) { if (this.move || this.pending) this.queued = dir; else this.step(dir); }
   }
   look(yaw, pitch = 0) { this.yaw = wrap(yaw); this.pitch = clamp(pitch, -1.55, 1.55); }
+  // stop drawing while the tour is hidden (battery), carry on where it was when shown again
+  pause() { if (this.raf) cancelAnimationFrame(this.raf); this.raf = 0; this.keys.clear(); }
+  resume() { if (!this.raf) { this.last = performance.now(); this.raf = requestAnimationFrame((t) => this.frame(t)); } }
   focus() { this.canvas.focus({ preventScroll: true }); }
   resize() {
     const w = this.root.clientWidth || 1, h = this.root.clientHeight || 1;
