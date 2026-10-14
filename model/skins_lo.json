@@ -1,0 +1,1 @@
+{"page": 4096, "pages": ["atlas_lo_0"], "chunks": [{"page": 0, "floor": false, "vertices": 4584, "indices": 6228, "pos": 0, "uv": 55008, "idx": 91680}, {"page": 0, "floor": true, "vertices": 801, "indices": 801, "pos": 116592, "uv": 126204, "idx": 132612}]}

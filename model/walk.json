@@ -1,0 +1,12 @@
+{
+ "x0": -22.0,
+ "y0": -12.5,
+ "x1": 26.0,
+ "y1": 27.5,
+ "res": 0.05,
+ "w": 960,
+ "h": 800,
+ "radius": 0.18,
+ "platform_h": 0.15,
+ "note": "pixel (i,j): X = x0+(i+0.5)*res (east), Y = y1-(j+0.5)*res (north); three.js x = X, z = -Y. R = blocked, G = cardio platform"
+}

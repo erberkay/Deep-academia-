@@ -395,7 +395,7 @@
   const isTouch = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
   if (!reduce && !isTouch) {
     window.addEventListener('wheel', (e) => {
-      if (e.ctrlKey || e.metaKey || menuOpen || tourOpen || ovlOpen() || !live()) return;
+      if (e.ctrlKey || e.metaKey || menuOpen || tourOpen || s3Open || ovlOpen() || !live()) return;
       e.preventDefault();
       const se = document.scrollingElement || html;
       sm.anim = null;
@@ -414,7 +414,8 @@
     const a = e.target && e.target.closest ? e.target.closest('a[href^="#"]') : null;
     if (!a) return;
     const href = a.getAttribute('href');
-    if (href === '#tur') { e.preventDefault(); setTour(true); return; }
+    if (href === '#tur') { e.preventDefault(); if (s3Open) swapOverlay('#tur'); else setTour(true); return; }
+    if (href === '#salon3d') { e.preventDefault(); if (tourOpen) swapOverlay('#salon3d'); else setSalon(true); return; }
     if (isPanelRoute(href)) { e.preventDefault(); openRoute(href); return; }
     const id = href.slice(1);
     const el = id ? document.getElementById(id) : null;
@@ -435,7 +436,7 @@
      tour/walker.js shows every capture point's photo cube at full quality and glides from point to point:
      ↑/W forward (hold to keep walking), ↓/S back, ←/→ turn, A/D side step; drag to look, tap to walk.
      It runs inside this page, so the keyboard (and Escape) stay with the site. */
-  const tour = $('.tour'), stage = tour ? $('.tour-walk', tour) : null;
+  const tour = document.getElementById('tur'), stage = tour ? $('.tour-walk', tour) : null;
   const tGo = tour ? $('.tour-go', tour) : null, tFs = tour ? $('.tour-fs', tour) : null;
   let tourOpen = false, tourReady = false, tourLive = false, tourBack = null, tourPushed = false;
   let wk = null, wkLoading = null;
@@ -463,7 +464,7 @@
     if (tour) tour.classList.toggle('away', tourOpen && tourLive && !!wk && document.activeElement !== wk.canvas);
   }
   function tourFocus() {
-    if (!wk || !tourLive) return;
+    if (!wk || !tourLive || !tourOpen) return;
     wk.focus();
     setTimeout(tourSync, 0);
   }
@@ -473,7 +474,7 @@
     tour.classList.add('live');
     tourFocus();
   }
-  function setTour(open) {
+  function setTour(open, swap) {
     if (!tour || open === tourOpen) return;
     tourOpen = open;
     if (open) {
@@ -501,13 +502,14 @@
       tour.setAttribute('aria-hidden', 'true');
       tour.setAttribute('inert', '');
       html.classList.remove('tour-on');
-      [...tour.parentElement.children].forEach((el) => { if (el !== tour) el.inert = el.classList.contains('ovl') && !el.classList.contains('open'); });
-      if (location.hash === '#tur') {
+      [...tour.parentElement.children].forEach((el) => { if (el !== tour) el.inert = (el.classList.contains('ovl') || el.classList.contains('tour')) && !el.classList.contains('open'); });
+      if (swap) history.replaceState({ tour: 1 }, '', swap);
+      else if (location.hash === '#tur') {
         if (tourPushed) history.back();
         else history.replaceState(null, '', location.pathname + location.search);
       }
       tourPushed = false;
-      if (tourBack && tourBack.focus) tourBack.focus({ preventScroll: true });
+      if (!swap && tourBack && tourBack.focus) tourBack.focus({ preventScroll: true });
     }
     tourSync();
   }
@@ -549,6 +551,197 @@
     });
     if (location.hash === '#tur') setTour(true);
     window.addEventListener('hashchange', () => setTour(location.hash === '#tur'));
+  }
+
+  /* ---------------- 3D SALON: the gym's photoreal 3D model, walked like a game ----------------
+     model/gym3d.js: walls, floor and ceiling are the gym's own photos, the equipment is 3D. Same keys as the 360° tour,
+     plus click / tap the floor to walk there and a menu that jumps to the main areas. Built like the tour overlay:
+     its own history entry (Back / Escape / ✕ close it), the page behind is inert, focus comes back to the opener. */
+  const s3 = document.getElementById('salon3d'), s3Stage = s3 ? $('.tour-walk', s3) : null;
+  const s3Go = s3 ? $('.tour-go', s3) : null, s3Fs = s3 ? $('.tour-fs', s3) : null;
+  const s3PlBtn = s3 ? $('.s3d-pl-btn', s3) : null, s3PlList = s3 ? $('.s3d-pl-list', s3) : null;
+  let s3Open = false, s3Ready = false, s3Live = false, s3Back = null, s3Pushed = false, s3Place = '';
+  let gv = null, gvLoading = null;
+  const S3_V = '1';
+  function loadGym() {
+    if (gvLoading) return gvLoading;
+    const pc = $('.s3d-pc', s3), mpc = $('.s3d-mpc', s3);
+    // the three.js add-ons need import maps (Safari 16.4+); older browsers get the 360° tour link instead
+    const maps = !!(window.HTMLScriptElement && HTMLScriptElement.supports && HTMLScriptElement.supports('importmap'));
+    gvLoading = (maps ? import('./model/gym3d.js?v=' + S3_V) : Promise.reject(new Error('import maps')))
+      .then(({ Gym3D, drawMap }) => {
+        const map = $('.tour-map', s3), mctx = map.getContext('2d');
+        gv = new Gym3D(s3Stage, {
+          onProgress: (p) => { if (pc) pc.textContent = '%' + Math.round(p * 100); },
+          onModel: (p) => {
+            s3.classList.toggle('s3d-loading', p < 1);
+            if (mpc) mpc.textContent = '%' + Math.round(p * 100);
+          },
+          onFrame: (st) => {
+            if (!s3Live) return;
+            drawMap(mctx, map.width / 200, st);
+            if (st.place !== s3Place) s3SetPlace(st.place);
+          },
+        });
+        gv.canvas.addEventListener('focus', s3Sync);
+        gv.canvas.addEventListener('blur', () => setTimeout(s3Sync, 0));
+        if (!s3Open) gv.pause();
+        return gv.load('model/?v=' + S3_V);
+      })
+      .then(() => {
+        s3Ready = true;
+        s3.classList.add('ready');
+        if (s3Go) { s3Go.disabled = false; if (s3Open && !s3Live) s3Go.focus({ preventScroll: true }); }
+      })
+      .catch((err) => {
+        s3.classList.add('fail');
+        if (window.console) console.warn('3D salon:', err && err.message ? err.message : err);
+      });
+    return gvLoading;
+  }
+  function s3SetPlace(id) {
+    s3Place = id || '';
+    const b = s3PlList && $('[data-place="' + s3Place + '"]', s3PlList);
+    if (b) $('.s3d-pl-cur', s3).textContent = b.textContent;
+    if (s3PlList) $$('button', s3PlList).forEach((x) => x.setAttribute('aria-current', x === b ? 'true' : 'false'));
+  }
+  function s3Sync() {
+    if (s3) s3.classList.toggle('away', s3Open && s3Live && !!gv && document.activeElement !== gv.canvas && !s3Menu());
+  }
+  function s3Focus() {
+    if (!gv || !s3Live || !s3Open) return;
+    gv.focus();
+    setTimeout(s3Sync, 0);
+  }
+  function s3Start() {
+    if (!s3Ready || s3Live) return;
+    s3Live = true;
+    s3.classList.add('live');
+    if (gv) gv.resume();     // draws a frame now, so the minimap and the place name show at once
+    s3Focus();
+  }
+  const s3Menu = () => !!s3PlList && !s3PlList.hidden;
+  function s3SetMenu(open, focusFirst) {
+    if (!s3PlList || s3Menu() === open) return;
+    s3PlList.hidden = !open;
+    s3PlBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open && focusFirst) { const b = $('[aria-current="true"]', s3PlList) || $('button', s3PlList); if (b) b.focus({ preventScroll: true }); }
+    s3Sync();
+  }
+  function setSalon(open, swap) {
+    if (!s3 || open === s3Open) return;
+    s3Open = open;
+    if (open) {
+      if (menuOpen) setMenu(false);
+      s3Back = document.activeElement;
+      // a link in the (now closing) burger menu hands focus back to the burger
+      if (!s3Back || s3Back === document.body || (s3Back.closest && s3Back.closest('.menu'))) s3Back = $('.burger');
+      loadGym();
+      if (gv) gv.resume();
+      s3.removeAttribute('inert');
+      s3.setAttribute('aria-hidden', 'false');
+      s3.classList.add('open');
+      html.classList.add('tour-on');
+      [...s3.parentElement.children].forEach((el) => { if (el !== s3) el.inert = true; });
+      sm.anim = null; sm.run = false;
+      setTimeout(() => {
+        if (!s3Open) return;
+        if (s3Live) s3Focus();
+        else (s3Go && !s3Go.disabled ? s3Go : $('.tour-x', s3)).focus({ preventScroll: true });
+      }, 80);
+      if (location.hash !== '#salon3d') { history.pushState({ salon: 1 }, '', '#salon3d'); s3Pushed = true; }
+    } else {
+      if (document.fullscreenElement === s3 && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+      s3SetMenu(false);
+      if (gv) gv.pause();
+      s3.classList.remove('open');
+      s3.setAttribute('aria-hidden', 'true');
+      s3.setAttribute('inert', '');
+      html.classList.remove('tour-on');
+      [...s3.parentElement.children].forEach((el) => { if (el !== s3) el.inert = (el.classList.contains('ovl') || el.classList.contains('tour')) && !el.classList.contains('open'); });
+      if (swap) history.replaceState({ tour: 1 }, '', swap);
+      else if (location.hash === '#salon3d') {
+        if (s3Pushed) history.back();
+        else history.replaceState(null, '', location.pathname + location.search);
+      }
+      s3Pushed = false;
+      if (!swap && s3Back && s3Back.focus) s3Back.focus({ preventScroll: true });
+    }
+    s3Sync();
+  }
+  // from the 360° tour to the 3D salon and back: one overlay hands over to the other on the same history entry
+  function swapOverlay(to) {
+    if (to === '#salon3d' && tourOpen) {
+      const pushed = tourPushed, back = tourBack;
+      setTour(false, '#salon3d');
+      setSalon(true);
+      s3Pushed = pushed; s3Back = back;
+    } else if (to === '#tur' && s3Open) {
+      const pushed = s3Pushed, back = s3Back;
+      setSalon(false, '#tur');
+      setTour(true);
+      tourPushed = pushed; tourBack = back;
+    }
+  }
+  if (s3) {
+    $('.tour-x', s3).addEventListener('click', () => setSalon(false));
+    if (s3Go) s3Go.addEventListener('click', s3Start);
+    $('.tour-hint', s3).addEventListener('click', s3Focus);
+    $$('.tour-dpad button', s3).forEach((btn) => {
+      const d = btn.dataset.d;
+      const on = (e) => { e.preventDefault(); if (gv && s3Live) gv.press(d, true); };
+      const off = () => { if (gv) gv.press(d, false); };
+      btn.addEventListener('pointerdown', on);
+      ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => btn.addEventListener(ev, off));
+      btn.addEventListener('contextmenu', (e) => e.preventDefault());
+    });
+    if (s3PlBtn) {
+      s3PlBtn.addEventListener('click', (e) => s3SetMenu(!s3Menu(), e.detail === 0));
+      $$('button', s3PlList).forEach((b) => b.addEventListener('click', () => {
+        s3SetMenu(false);
+        if (gv && s3Live && gv.teleport(b.dataset.place)) s3SetPlace(b.dataset.place);
+        s3Focus();
+      }));
+      // arrow keys move through the list; Tab out or a click elsewhere closes it
+      s3PlList.addEventListener('keydown', (e) => {
+        if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+        e.preventDefault(); e.stopPropagation();
+        const bs = $$('button', s3PlList), i = bs.indexOf(document.activeElement);
+        bs[(i + (e.key === 'ArrowDown' ? 1 : bs.length - 1)) % bs.length].focus({ preventScroll: true });
+      });
+      s3.addEventListener('focusout', (e) => { if (s3Menu() && e.relatedTarget && !e.relatedTarget.closest('.s3d-places')) s3SetMenu(false); });
+      s3.addEventListener('pointerdown', (e) => { if (s3Menu() && !e.target.closest('.s3d-places')) s3SetMenu(false); });
+    }
+    if (s3Fs) {
+      if (!document.fullscreenEnabled || !s3.requestFullscreen) s3Fs.hidden = true;
+      s3Fs.addEventListener('click', () => {
+        if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+        else s3.requestFullscreen().catch(() => {});
+      });
+      document.addEventListener('fullscreenchange', () => {
+        const fs = document.fullscreenElement === s3;
+        s3Fs.setAttribute('aria-pressed', fs ? 'true' : 'false');
+        s3Fs.setAttribute('aria-label', fs ? 'Tam ekrandan çık' : 'Tam ekran');
+        setTimeout(s3Focus, 60);
+      });
+    }
+    document.addEventListener('keydown', (e) => {
+      if (!s3Open) return;
+      if (e.key === 'Escape') {
+        if (s3Menu()) { s3SetMenu(false); s3PlBtn.focus({ preventScroll: true }); return; }
+        setSalon(false); return;
+      }
+      if (!walkKey(e.key) || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (gv && document.activeElement === gv.canvas) return;   // the viewer handles it
+      if (s3Menu() && /^Arrow(Up|Down)$/.test(e.key)) return;   // moving through the places list
+      e.preventDefault();
+      if (!s3Live) { s3Start(); return; }
+      s3SetMenu(false);
+      s3Focus();
+      if (gv) gv.onKey(e);
+    });
+    if (location.hash === '#salon3d') setSalon(true);
+    window.addEventListener('hashchange', () => setSalon(location.hash === '#salon3d'));
   }
 
   /* ---------------- weekly timetable (#program) and class details (#ders-<slug>) ----------------
@@ -705,7 +898,7 @@
     // the page behind is inert while a panel is open (only on a change: the tour manages it while it is open)
     if (open !== wasOpen) {
       [...(cal || dz).parentElement.children].forEach((el) => {
-        if (el === cal || el === dz || el === tour) return;
+        if (el === cal || el === dz || el === tour || el === s3) return;
         el.inert = open;
       });
     }
@@ -759,7 +952,7 @@
   }
   if (cal && dz) {
     $$('.ovl-x', cal).concat($$('.ovl-x', dz)).forEach((b) => b.addEventListener('click', closeTop));
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && ovlOpen() && !tourOpen) { e.preventDefault(); closeTop(); } });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && ovlOpen() && !tourOpen && !s3Open) { e.preventDefault(); closeTop(); } });
     const onNav = () => {
       route();
       if (!ovlOpen() && afterClose) { const f = afterClose; afterClose = null; setTimeout(f, 0); }
