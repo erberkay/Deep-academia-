@@ -563,7 +563,7 @@
   const s3PlBtn = s3 ? $('.s3d-pl-btn', s3) : null, s3PlList = s3 ? $('.s3d-pl-list', s3) : null;
   let s3Open = false, s3Ready = false, s3Live = false, s3Back = null, s3Pushed = false, s3Place = '';
   let gv = null, gvLoading = null, s3Pos = null, s3DropT = 0;
-  const S3_V = '2', S3_DATA = '1';   // the viewer module / the model data (cache busting)
+  const S3_V = '2', S3_DATA = '2';   // the viewer module / the model data (cache busting)
   function loadGym() {
     if (gvLoading) return gvLoading;
     const pc = $('.s3d-pc', s3), mpc = $('.s3d-mpc', s3);
