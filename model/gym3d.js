@@ -30,9 +30,14 @@ const EYE = 1.6;              // m: eye height above the floor
 const WALK = 1.4, RUN = 2.6;  // m/s
 const TURN = 1.9;             // rad/s at full turn (keys)
 const ACCEL = 8;              // 1/s: how fast the walk speed follows the keys
-const ENV_INT = 1.5;          // image-based light strength on the 3D models (LDR photos: a little boost matches them)
+const ENV_INT = 2.2;          // image-based light strength on the 3D models (LDR photos: a boost matches them; calibrated
+                              // so a white part next to the photographed white radiator in the locker room reads the same)
 const ENV_FADE = 900;         // ms: crossfade between two captures' light
 const CELL = 8;               // m: merged static geometry is grouped per CELL x CELL tile (keeps frustum culling)
+const LOD_D = 6;              // m: heavy instanced parts (e.g. the kettlebells) farther than this use a light version
+const LOD_TRIS = 4000;        // ... when one copy has more triangles than this
+const TILE_LOD_D = 10;        // m: merged tiles (see CELL) farther than this use their coarser version
+const CLEAR = 0x5f5a56;       // background: a wall-like grey, so a hairline gap between photos does not show as a black line
 const COARSE = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
 const REDUCE = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 const DEBUG = typeof location !== 'undefined' && /[?&]g3debug\b/.test(location.search);
@@ -46,30 +51,59 @@ const NB8 = [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [1, 1, 1.4142], [-1, 
 
 /* ---------- loading helpers ---------- */
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const aborted = (e) => !!e && (e.name === 'AbortError' || e.g3abort);
 // a flaky mobile connection (or a busy server) gets two more tries
 async function retry(fn) {
   for (let i = 0; ; i++) {
-    try { return await fn(); } catch (e) { if (i >= 2 || e.status === 404) throw e; }
+    try { return await fn(); } catch (e) { if (i >= 2 || e.status === 404 || aborted(e)) throw e; }
     await wait(500 * (i + 1) * (i + 1));
   }
 }
-// fetch with byte progress (onp(loaded, total)); total may be 0 when the server does not say
-const fetchBuf = (url, onp) => retry(() => fetchOnce(url, onp));
-async function fetchOnce(url, onp) {
-  const res = await fetch(url);
+// the real file size from the first bytes of a .glb / .ktx2 (a gzip-compressing server such as GitHub Pages
+// sends the compressed Content-Length, which says nothing about the bytes the stream delivers)
+function sizeFromHead(u8) {
+  if (u8.length < 12) return 0;
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  if (dv.getUint32(0, true) === 0x46546C67) return dv.getUint32(8, true);              // 'glTF': total length
+  if (u8[0] === 0xAB && u8[1] === 0x4B && u8[2] === 0x54 && u8[3] === 0x58 && u8[5] === 0x32 && u8[6] === 0x30 && u8.length >= 80) {
+    const levels = Math.max(1, dv.getUint32(40, true));                               // KTX2: mip levels come last
+    if (u8.length < 80 + levels * 24) return 0;
+    let end = 0;
+    for (let k = 0; k < levels; k++) {
+      const o = 80 + k * 24;
+      const off = dv.getUint32(o, true) + dv.getUint32(o + 4, true) * 4294967296;
+      const len = dv.getUint32(o + 8, true) + dv.getUint32(o + 12, true) * 4294967296;
+      end = Math.max(end, off + len);
+    }
+    return end;
+  }
+  return 0;
+}
+// fetch with byte progress (onp(loaded, total)); total may be 0 when the size is not known
+const fetchBuf = (url, onp, signal) => retry(() => fetchOnce(url, onp, signal));
+async function fetchOnce(url, onp, signal) {
+  const res = await fetch(url, signal ? { signal } : undefined);
   if (!res.ok) { const e = new Error(url + ' ' + res.status); e.status = res.status; throw e; }
-  const total = +res.headers.get('content-length') || 0;
+  // a compressed response: Content-Length is the compressed size, not what the stream delivers
+  let total = res.headers.get('content-encoding') ? 0 : +res.headers.get('content-length') || 0;
   if (!res.body || !res.body.getReader) {
     const b = await res.arrayBuffer();
     if (onp) onp(b.byteLength, b.byteLength);
     return b;
   }
   const reader = res.body.getReader(), parts = [];
-  let got = 0;
+  let got = 0, sniffed = false;
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
     parts.push(value); got += value.length;
+    if (!sniffed && got >= 512) {
+      sniffed = true;
+      const head = parts.length === 1 ? value : new Uint8Array(got);
+      if (parts.length > 1) { let o = 0; for (const p of parts) { head.set(p, o); o += p.length; } }
+      const n = sizeFromHead(head);
+      if (n >= got) total = n;
+    }
     if (onp) onp(got, total);
   }
   const out = new Uint8Array(got);
@@ -92,6 +126,83 @@ class Progress {
   }
 }
 const nextFrame = () => new Promise((r) => (typeof requestAnimationFrame === 'function' ? requestAnimationFrame(() => r()) : setTimeout(r, 16)));
+
+/* ---------- mesh simplification off the main thread ----------
+   jobs: [{ idx: Uint32Array, pos: Float32Array (xyz), target: index count, err: relative error }] -> index arrays
+   (null where it did not help). A module worker runs meshoptimizer; where that is not possible, the main thread does. */
+const SIMPLIFY_SRC = `import { MeshoptSimplifier as S } from '${SIMPLIFIER}';
+const run = (j) => S.simplify(j.idx, j.pos, 3, j.target, j.err)[0];
+onmessage = async (e) => {
+  await S.ready;
+  const out = e.data.jobs.map((j) => { try { return run(j); } catch (err) { return null; } });
+  postMessage({ id: e.data.id, out }, out.filter(Boolean).map((a) => a.buffer));
+};`;
+let simplifyWorker = null;
+function workerSimplify(jobs) {
+  if (typeof Worker !== 'function' || simplifyWorker === false) return Promise.reject(new Error('no worker'));
+  if (!simplifyWorker) {
+    try {
+      const u = URL.createObjectURL(new Blob([SIMPLIFY_SRC], { type: 'text/javascript' }));
+      simplifyWorker = { w: new Worker(u, { type: 'module' }), n: 0, wait: new Map() };
+      simplifyWorker.w.onmessage = (e) => { const f = simplifyWorker.wait.get(e.data.id); if (f) { simplifyWorker.wait.delete(e.data.id); f.res(e.data.out); } };
+      simplifyWorker.w.onerror = (e) => {
+        if (e && e.preventDefault) e.preventDefault();
+        const W = simplifyWorker; simplifyWorker = false;
+        W.wait.forEach((f) => f.rej(new Error('worker'))); W.wait.clear(); W.w.terminate();
+      };
+    } catch (e) { simplifyWorker = false; return Promise.reject(e); }
+  }
+  const W = simplifyWorker, id = ++W.n;
+  return new Promise((res, rej) => {
+    W.wait.set(id, { res, rej });
+    W.w.postMessage({ id, jobs }, jobs.flatMap((j) => [j.idx.buffer, j.pos.buffer]));
+  });
+}
+let mainSimplifier = null;
+async function simplifyJobs(jobs, yieldFn) {
+  if (!jobs.length) return [];
+  // the worker gets copies, so the main-thread fallback still has the originals
+  const copy = jobs.map((j) => ({ idx: j.idx.slice(), pos: j.pos.slice(), target: j.target, err: j.err, sloppy: j.sloppy }));
+  try { return await workerSimplify(copy); } catch (e) { /* main thread below */ }
+  if (!mainSimplifier) mainSimplifier = import(SIMPLIFIER).then((m) => m.MeshoptSimplifier.ready.then(() => m.MeshoptSimplifier)).catch(() => null);
+  const S = await mainSimplifier;
+  if (!S || !S.supported) return jobs.map(() => null);
+  const out = [];
+  let t0 = performance.now();
+  for (const j of jobs) {
+    try { out.push(S.simplify(j.idx, j.pos, 3, j.target, j.err)[0]); } catch (e) { out.push(null); }
+    if (performance.now() - t0 > 12) { await yieldFn(); t0 = performance.now(); }
+  }
+  return out;
+}
+// a geometry's (local) positions as a plain Float32Array (xyz)
+function positions(g) {
+  const n = g.attributes.position.count, P = reader(g.attributes.position), pos = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) { const o = P.off + i * P.st; pos[i * 3] = P.arr[o] * P.s; pos[i * 3 + 1] = P.arr[o + 1] * P.s; pos[i * 3 + 2] = P.arr[o + 2] * P.s; }
+  return pos;
+}
+const indexU32 = (I) => (I.array instanceof Uint32Array && I.array.length === I.count ? I.array : Uint32Array.from(I.array.subarray(0, I.count)));
+// a coarse version for far away: vertices snapped together per cell (size in the geometry's own units), the triangles
+// that collapse dropped. Works on any mesh (also ones made of many separate pieces, which edge collapse cannot thin);
+// the kept vertices are original ones, so only a new index buffer is needed
+function clusterIndex(I, pos, cell) {
+  const n = pos.length / 3, inv = 1 / cell, rep = new Int32Array(n), cells = new Map();
+  const K = 131072, H = 65536;
+  for (let i = 0; i < n; i++) {
+    const key = (Math.floor(pos[i * 3] * inv) + H) + (Math.floor(pos[i * 3 + 1] * inv) + H) * K + (Math.floor(pos[i * 3 + 2] * inv) + H) * K * K;
+    let r = cells.get(key);
+    if (r === undefined) { r = i; cells.set(key, i); }
+    rep[i] = r;
+  }
+  const a = I.array, c = I.count, out = new Uint32Array(c);
+  let o = 0;
+  for (let t = 0; t + 2 < c; t += 3) {
+    const x = rep[a[t]], y = rep[a[t + 1]], z = rep[a[t + 2]];
+    if (x === y || y === z || x === z) continue;
+    out[o++] = x; out[o++] = y; out[o++] = z;
+  }
+  return out.subarray(0, o);
+}
 
 /* ---------- merged static geometry: one draw call per tile instead of one per part ----------
    gym.glb has ~450 flat-colour materials. Parts with plain (untextured, opaque, non-glowing) materials are baked into
@@ -142,16 +253,20 @@ function reader(a) {
   return { arr, st: ib ? a.data.stride : a.itemSize, off: ib ? a.offset : 0, s };
 }
 const _m3 = new THREE.Matrix3(), _col = new THREE.Color();
-// items: [{ geo, matrix (Matrix4 or null = identity), mat }]
+const _pm = new THREE.Matrix4(), _fr = new THREE.Frustum(), _sp = new THREE.Sphere();
+// items: [{ geo, matrix (Matrix4 or null = identity), mat, far (optional coarser index of geo, for a far version) }]
+// -> geometry; geometry.userData.far: the same vertices with the coarser indices (only when some item has one)
 function buildMerged(items) {
-  let nv = 0, ni = 0;
+  let nv = 0, ni = 0, nf = 0;
   for (const it of items) {
-    const n = it.geo.attributes.position.count;
-    nv += n; ni += it.geo.index ? it.geo.index.count : n;
+    const n = it.geo.attributes.position.count, c = it.geo.index ? it.geo.index.count : n;
+    nv += n; ni += c; nf += it.far ? it.far.length : c;
   }
   const pos = new Float32Array(nv * 3), nrm = new Int8Array(nv * 4), col = new Uint8Array(nv * 4);
   const idx = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni);
-  let vo = 0, io = 0;
+  const hasFar = items.some((it) => it.far);
+  const fidx = hasFar ? (nv > 65535 ? new Uint32Array(nf) : new Uint16Array(nf)) : null;
+  let vo = 0, io = 0, fo = 0;
   for (const it of items) {
     const g = it.geo, P = reader(g.attributes.position), N = reader(g.attributes.normal), n = g.attributes.position.count;
     const e = it.matrix ? it.matrix.elements : null;
@@ -177,18 +292,17 @@ function buildMerged(items) {
     }
     // a mirrored part (negative scale) is drawn flipped by three.js; baked into world space, flip its triangles
     const flip = !!(e && it.matrix.determinant() < 0);
-    if (g.index) {
-      const a = g.index.array, c = g.index.count;
+    const put = (dst, o, a, c) => {
       for (let t = 0; t + 2 < c; t += 3) {
-        idx[io++] = a[t] + vo;
-        if (flip) { idx[io++] = a[t + 2] + vo; idx[io++] = a[t + 1] + vo; } else { idx[io++] = a[t + 1] + vo; idx[io++] = a[t + 2] + vo; }
+        const i0 = a ? a[t] : t, i1 = a ? a[t + 1] : t + 1, i2 = a ? a[t + 2] : t + 2;
+        dst[o++] = i0 + vo;
+        if (flip) { dst[o++] = i2 + vo; dst[o++] = i1 + vo; } else { dst[o++] = i1 + vo; dst[o++] = i2 + vo; }
       }
-    } else {
-      for (let t = 0; t + 2 < n; t += 3) {
-        idx[io++] = t + vo;
-        if (flip) { idx[io++] = t + 2 + vo; idx[io++] = t + 1 + vo; } else { idx[io++] = t + 1 + vo; idx[io++] = t + 2 + vo; }
-      }
-    }
+      return o;
+    };
+    const a0 = g.index ? g.index.array : null, c0 = g.index ? g.index.count : n;
+    io = put(idx, io, a0, c0);
+    if (fidx) fo = it.far ? put(fidx, fo, it.far, it.far.length) : put(fidx, fo, a0, c0);
     vo += n;
   }
   const geo = new THREE.BufferGeometry();
@@ -199,7 +313,16 @@ function buildMerged(items) {
   geo.setAttribute('g3c', new THREE.BufferAttribute(col, 4, true));
   geo.setIndex(new THREE.BufferAttribute(io < idx.length ? idx.subarray(0, io) : idx, 1));
   geo.computeBoundingBox(); geo.computeBoundingSphere();
+  if (fidx) geo.userData.far = lodGeometry(geo, fo < fidx.length ? fidx.subarray(0, fo) : fidx);
   return geo;
+}
+// the same vertices with other (coarser) indices: only an extra index buffer on the GPU
+function lodGeometry(geo, index) {
+  const g2 = new THREE.BufferGeometry();
+  for (const name in geo.attributes) g2.setAttribute(name, geo.attributes[name]);
+  g2.setIndex(new THREE.BufferAttribute(index, 1));
+  g2.boundingBox = geo.boundingBox; g2.boundingSphere = geo.boundingSphere;
+  return g2;
 }
 
 /* ---------- fullscreen helpers ---------- */
@@ -222,19 +345,29 @@ export class Gym3D {
     this.last = performance.now();
     this.rendered = { x: NaN };
     this.perf = { acc: 0, n: 0, lastT: 0, good: 0, cool: 0 };
+    this.open = true; this.waiters = []; this.instSets = []; this.tiles = [];
 
-    const r = this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    this.tier = this.pickTier();
+    // touch devices (phones and tablets) and low-memory ones: lighter model work (smaller textures, coarser thinning)
+    this.light = this.tier === 'lo' || COARSE;
+    const dpr = window.devicePixelRatio || 1;
+    // a phone's dense screen hides jaggies; multisampling a 2-3x drawing buffer costs ~50 MB of GPU memory
+    const r = this.renderer = new THREE.WebGLRenderer({ antialias: !(COARSE && dpr >= 2), powerPreference: 'high-performance' });
     r.outputColorSpace = THREE.SRGBColorSpace;
     r.toneMapping = THREE.NoToneMapping;          // photo skins must show the photos' own colours
-    r.setClearColor(0x0b0b0b, 1);
-    this.tier = this.pickTier();
-    this.prMax = Math.min(window.devicePixelRatio || 1, COARSE ? 2 : 1.5);
+    r.setClearColor(CLEAR, 1);
+    // tablets: at most 1.5x (a 2x iPad screen is ~4.6 MP per frame)
+    this.prMax = Math.min(dpr, COARSE && this.small ? 2 : 1.5);
     this.prMin = Math.min(1, this.prMax);
     this.pr = this.prMax;
     r.setPixelRatio(this.pr);
     this.canvas = r.domElement;
     this.canvas.className = 'wk-canvas';
-    this.canvas.tabIndex = 0;
+    this.canvas.tabIndex = opts.tabIndex == null ? 0 : opts.tabIndex;
+    // a lost WebGL context (phones under memory pressure, or after a long time in the background): the browser gives it
+    // back later, and the image-based light has to be built again (its render target lost its contents)
+    this.canvas.addEventListener('webglcontextlost', this.onLost = (e) => { e.preventDefault(); this.lost = true; });
+    this.canvas.addEventListener('webglcontextrestored', this.onRestored = () => { this.lost = false; this.restored = true; this.rebuildEnv(); this.dirty = true; });
     this.canvas.setAttribute('aria-label', '3D salon: yön tuşlarıyla yürüyün');
     root.appendChild(this.canvas);
 
@@ -270,10 +403,25 @@ export class Gym3D {
 
   pickTier() {
     const q = /[?&]g3q=(hi|lo)\b/.exec(location.search);
-    if (q) return q[1];
     const mem = navigator.deviceMemory || 8;
-    const small = Math.min(screen.width || 9999, screen.height || 9999) < 820;
+    const small = this.small = Math.min(screen.width || 9999, screen.height || 9999) < 820;
+    if (q) return q[1];
     return (COARSE && small) || mem <= 4 ? 'lo' : 'hi';
+  }
+  // loading only goes on while the viewer is shown (closed: no downloads on phones, no main-thread work anywhere)
+  whenOpen() { return this.open || this.dead ? Promise.resolve() : new Promise((r) => this.waiters.push(r)); }
+  async tick() { await nextFrame(); await this.whenOpen(); if (this.dead) throw Object.assign(new Error('destroyed'), { g3abort: true }); }
+  async get(url, onp) {
+    for (;;) {
+      await this.whenOpen();
+      if (this.dead) throw Object.assign(new Error('destroyed'), { g3abort: true });
+      if (!this.ac || this.ac.signal.aborted) this.ac = typeof AbortController === 'function' ? new AbortController() : null;
+      const ac = this.ac;
+      try { return await fetchBuf(url, onp, ac && ac.signal); } catch (e) {
+        if (!aborted(e) || !ac || !ac.signal.aborted) throw e;
+        // closed while downloading: start again when shown (the HTTP cache keeps what had finished)
+      }
+    }
   }
 
   /* ---------- data ---------- */
@@ -285,7 +433,7 @@ export class Gym3D {
     this.url = url;
     if (this.renderer.capabilities.maxTextureSize < 4096) throw new Error('maxTextureSize');
     const prog = new Progress((p) => { if (this.opts.onProgress) this.opts.onProgress(p); });
-    const getJSON = (f) => fetchBuf(url(f)).then((b) => JSON.parse(new TextDecoder().decode(b)));
+    const getJSON = (f) => this.get(url(f)).then((b) => JSON.parse(new TextDecoder().decode(b)));
     const [places, walk, map, skins] = await Promise.all(['places.json', 'walk.json', 'map.json', `skins_${this.tier}.json`].map(getJSON));
     this.places = places; this.walkInfo = walk; this.mapInfo = map;
     this.eye = places.eye || EYE;
@@ -297,20 +445,22 @@ export class Gym3D {
     this.ktx2 = new KTX2Loader().setTranscoderPath(JSM + 'libs/basis/').setWorkerLimit(2).detectSupport(this.renderer);
     const ktx = (buf) => (this.ktx2._createTexture ? this.ktx2._createTexture(buf)
       : this.ktx2.loadAsync(URL.createObjectURL(new Blob([buf]))));
-    const pages = Promise.all(skins.pages.map((n, k) => fetchBuf(url(n + '.ktx2'), pPages[k]).then(ktx)));
-    const bin = fetchBuf(url(`skins_${this.tier}.bin`), pBin);
-    const grid = fetchBuf(url('walk.png'), pWalk).then((b) => this.readGrid(b));
-    const mapImg = fetchBuf(url('map.jpg'), pMap).then((b) => this.readMap(b));
+    const pages = Promise.all(skins.pages.map((n, k) => this.get(url(n + '.ktx2'), pPages[k]).then(ktx)));
+    const bin = this.get(url(`skins_${this.tier}.bin`), pBin);
+    const grid = this.get(url('walk.png'), pWalk).then((b) => this.readGrid(b));
+    const mapImg = this.get(url('map.jpg'), pMap).then((b) => this.readMap(b));
     // all run together; whichever fails first fails the load (the others must not end up as unhandled rejections)
     [pages, bin, mapImg].forEach((p) => p.catch(() => {}));
     await grid;
     this.initPlaces();
-    const start = this.placeById('giris') || places.places[0];
+    // opts.start: where the walker was before the viewer was let go of (it reopens there)
+    const start = this.opts.start || this.placeById('giris') || places.places[0];
     const sp = this.nudge(start.x, start.z);
     this.x = sp.x; this.z = sp.z; this.yaw = start.yaw || 0; this.pitch = 0;
     this.floorY = this.platAt(this.x, this.z) ? (walk.platform_h || 0.15) : 0;
     const env = this.initEnv().then(() => pEnv(1, 1));
     const [texs, buf] = await Promise.all([pages, bin, mapImg, env]);
+    await this.whenOpen();
     if (this.dead) return;
     this.buildSkins(skins, buf, texs);
     this.ready = true;
@@ -318,6 +468,7 @@ export class Gym3D {
     if (this.opts.onProgress) this.opts.onProgress(1);
     // the 3D equipment streams in behind the photos
     this.modelPromise = this.loadModel().catch((err) => {
+      if (this.dead || aborted(err)) return;
       if (this.opts.onModel) this.opts.onModel(1);
       console.warn('3D salon: model', err);
     });
@@ -505,6 +656,17 @@ export class Gym3D {
     this.scene.environment = this.envRT.texture;
     this.prefetchEnv();
   }
+  // after a lost WebGL context came back: a fresh PMREM generator and light (the old ones belonged to the lost context)
+  rebuildEnv() {
+    if (!this.pmrem || this.dead) return;
+    this.pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.blendRT = new THREE.WebGLRenderTarget(512, 256, { type: THREE.HalfFloatType, depthBuffer: false, generateMipmaps: false });
+    this.envTr = null;
+    const e = this.envCur && this.envCache.get(this.envCur.id);
+    if (!e || !e.tex) return;
+    this.envRT = this.pmrem.fromEquirectangular(e.tex);
+    this.scene.environment = this.envRT.texture;
+  }
   nearestCap(x, z) {
     let best = null, bd = Infinity;
     for (const c of this.caps) { const d = (c.x - x) ** 2 + (c.z - z) ** 2; if (d < bd) { bd = d; best = c; } }
@@ -514,7 +676,7 @@ export class Gym3D {
     let e = this.envCache.get(c.id);
     if (!e) {
       e = { tex: null, used: 0 };
-      e.p = fetchBuf(this.url('env/' + c.id + '.jpg')).then((b) => this.decodeImage(b, 'image/jpeg', true)).then((img) => {
+      e.p = this.get(this.url('env/' + c.id + '.jpg')).then((b) => this.decodeImage(b, 'image/jpeg', true)).then((img) => {
         const t = new THREE.Texture(img);
         t.needsUpdate = true;
         t.colorSpace = THREE.SRGBColorSpace;
@@ -525,7 +687,7 @@ export class Gym3D {
         e.tex = t;
         return t;
       });
-      e.p.catch(() => { if (this.envCache.get(c.id) === e) this.envCache.delete(c.id); });   // try again later
+      e.p.catch(() => { if (this.envCache && this.envCache.get(c.id) === e) this.envCache.delete(c.id); });   // try again later
       this.envCache.set(c.id, e);
       // keep a handful in memory
       if (this.envCache.size > 10) {
@@ -576,17 +738,20 @@ export class Gym3D {
     const onModel = (p) => { if (this.opts.onModel) this.opts.onModel(p); };
     onModel(0);
     MeshoptDecoder.useWorkers && MeshoptDecoder.useWorkers(Math.min(2, Math.max(1, (navigator.hardwareConcurrency || 2) - 1)));
-    this.simplifier = import(SIMPLIFIER).then((m) => m.MeshoptSimplifier.ready.then(() => m.MeshoptSimplifier)).catch(() => null);
-    const buf = await fetchBuf(this.url('gym.glb'), (g, t) => onModel(t ? 0.85 * g / t : 0.4));
+    // never 100% before the model is in the scene (the size may be an estimate)
+    const buf = await this.get(this.url('gym.glb'), (g, t) => onModel(0.85 * Math.min(0.98, g / (t || 13e6))));
+    await this.whenOpen();
     if (this.dead) return;
     const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).setKTX2Loader(this.ktx2);
     const gltf = await loader.parseAsync(buf, this.dir);
+    await this.whenOpen();
     if (this.dead) return;
     onModel(0.9);
     const group = gltf.scene;
     await this.prepareModel(group);
     if (this.dead) return;
     onModel(0.96);
+    await this.whenOpen();
     try { await this.renderer.compileAsync(group, this.camera, this.scene); } catch (e) { /* compiled on first draw instead */ }
     if (this.dead) return;
     // upload the textures a few at a time, so the first frame with the model does not stall
@@ -595,40 +760,136 @@ export class Gym3D {
     let t0 = performance.now();
     for (const t of texs) {
       this.renderer.initTexture(t);
-      if (performance.now() - t0 > 10) { await nextFrame(); t0 = performance.now(); if (this.dead) return; }
+      if (performance.now() - t0 > 10) { await this.tick(); t0 = performance.now(); }
     }
+    await this.whenOpen();
+    if (this.dead) return;
     this.scene.add(group);
     this.model = group;
     this.envStale = true;
     this.dirty = true;
     onModel(1);
   }
-  // thin over-detailed geometry (relative error: a fraction of each part's size; only the index buffer changes)
+  // thin over-detailed geometry (relative error: a fraction of each part's size; only the index buffer changes).
+  // meshoptimizer runs in a worker, so walking is not interrupted while the equipment loads
   async simplify(root) {
-    const S = await this.simplifier;
-    if (!S || !S.supported || this.dead) return;
-    const err = this.tier === 'lo' ? 0.004 : 0.002;
-    const geos = new Set();
+    const err = this.light ? 0.004 : 0.002;
+    const geos = new Set(), jobs = [], list = [];
     root.traverse((o) => { if (o.isMesh && o.geometry) geos.add(o.geometry); });
-    let t0 = performance.now();
     for (const g of geos) {
       const I = g.index;
       if (!I || I.count < 9000 || g.groups.length > 1 || (g.morphAttributes && g.morphAttributes.position)) continue;
-      const n = g.attributes.position.count, P = reader(g.attributes.position), pos = new Float32Array(n * 3);
-      for (let i = 0; i < n; i++) { const o = P.off + i * P.st; pos[i * 3] = P.arr[o] * P.s; pos[i * 3 + 1] = P.arr[o + 1] * P.s; pos[i * 3 + 2] = P.arr[o + 2] * P.s; }
-      try {
-        const src = I.array instanceof Uint32Array && I.array.length === I.count ? I.array : Uint32Array.from(I.array.subarray(0, I.count));
-        const out = S.simplify(src, pos, 3, Math.floor(I.count * 0.2 / 3) * 3, err)[0];
-        if (out.length > 0 && out.length < I.count * 0.9) g.setIndex(new THREE.BufferAttribute(n > 65535 ? out : new Uint16Array(out), 1));
-      } catch (e) { /* keep the full detail */ }
-      if (performance.now() - t0 > 12) { await nextFrame(); t0 = performance.now(); if (this.dead) return; }
+      jobs.push({ idx: indexU32(I), pos: positions(g), target: Math.floor(I.count * 0.2 / 3) * 3, err });
+      list.push(g);
+    }
+    const out = await simplifyJobs(jobs, () => this.tick());
+    await this.whenOpen();
+    list.forEach((g, k) => {
+      const r = out[k], I = g.index, n = g.attributes.position.count;
+      if (r && r.length > 0 && r.length < I.count * 0.9) g.setIndex(new THREE.BufferAttribute(n > 65535 ? r : new Uint16Array(r), 1));
+    });
+  }
+  // the separate pieces of a mesh made of many joined parts (triangles linked by shared corners, welded by position: a
+  // box's faces do not share vertices), with their world bounds. Only triangles wholly above yMin (m) are looked at.
+  // -> { tri: piece of each triangle (-1: not looked at), box: [x0, y0, z0, x1, y1, z1] per piece }
+  pieces(o, yMin = -Infinity) {
+    const g = o.geometry, I = g.index, n = g.attributes.position.count, pos = positions(g), e = o.matrixWorld.elements;
+    const wy = new Float32Array(n), wx = new Float32Array(n), wz = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
+      wx[i] = e[0] * x + e[4] * y + e[8] * z + e[12]; wy[i] = e[1] * x + e[5] * y + e[9] * z + e[13]; wz[i] = e[2] * x + e[6] * y + e[10] * z + e[14];
+    }
+    const ix = I.array, cnt = I.count, nt = cnt / 3, use = new Uint8Array(nt);
+    const id = new Int32Array(n).fill(-1), key = new Map();
+    for (let t = 0; t < nt; t++) {
+      const a = ix[t * 3], b = ix[t * 3 + 1], c = ix[t * 3 + 2];
+      if (wy[a] < yMin || wy[b] < yMin || wy[c] < yMin) continue;
+      use[t] = 1;
+      for (const v of [a, b, c]) {
+        if (id[v] >= 0) continue;
+        const k = Math.round(pos[v * 3] * 1e4) + ',' + Math.round(pos[v * 3 + 1] * 1e4) + ',' + Math.round(pos[v * 3 + 2] * 1e4);
+        if (!key.has(k)) key.set(k, key.size);
+        id[v] = key.get(k);
+      }
+    }
+    const par = new Int32Array(key.size).map((_, i) => i);
+    const find = (a) => { while (par[a] !== a) { par[a] = par[par[a]]; a = par[a]; } return a; };
+    for (let t = 0; t < nt; t++) {
+      if (!use[t]) continue;
+      const a = find(id[ix[t * 3]]), b = find(id[ix[t * 3 + 1]]);
+      par[b] = a; par[find(id[ix[t * 3 + 2]])] = a;
+    }
+    const tri = new Int32Array(nt).fill(-1), box = new Map();
+    for (let t = 0; t < nt; t++) {
+      if (!use[t]) continue;
+      const r = tri[t] = find(id[ix[t * 3]]);
+      let bb = box.get(r);
+      if (!bb) box.set(r, bb = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity]);
+      for (let k = 0; k < 3; k++) {
+        const v = ix[t * 3 + k];
+        bb[0] = Math.min(bb[0], wx[v]); bb[1] = Math.min(bb[1], wy[v]); bb[2] = Math.min(bb[2], wz[v]);
+        bb[3] = Math.max(bb[3], wx[v]); bb[4] = Math.max(bb[4], wy[v]); bb[5] = Math.max(bb[5], wz[v]);
+      }
+    }
+    return { tri, box };
+  }
+  // keep only the triangles where keep(t) is true; the others (if out) go to a new index list
+  static split(g, keep) {
+    const ix = g.index.array, cnt = g.index.count, a = [], b = [];
+    for (let t = 0; t < cnt; t += 3) (keep(t / 3) ? a : b).push(ix[t], ix[t + 1], ix[t + 2]);
+    const T = g.attributes.position.count > 65535 ? Uint32Array : Uint16Array;
+    return [new T(a), new T(b)];
+  }
+  // parts that only repeat what the photos already show, and would cover them: the brick cladding and the round lit
+  // mirrors on the photographed brick wall, and the flat white boxes (vents, detectors) a few cm below the ceiling photo.
+  // And the hanging LED strips: modelled as a 6 cm black bar with a hairline diffuser under it, where the photos show
+  // bright bars; the bar above each diffuser is drawn glowing too
+  cleanModel(root) {
+    const drop = [];
+    root.traverse((o) => { if (o.isMesh && /^(brickC|porthole)/.test(o.name || (o.parent && o.parent.name) || '')) drop.push(o); });
+    drop.forEach((o) => { o.parent.remove(o); o.geometry.dispose(); });
+    root.updateMatrixWorld(true);
+    const plainOf = (name) => {
+      const l = [];
+      root.traverse((o) => { if (o.isMesh && !o.isInstancedMesh && !Array.isArray(o.material) && o.material && o.material.name === name && o.geometry.index) l.push(o); });
+      return l;
+    };
+    for (const o of plainOf('white')) {
+      const P = this.pieces(o), g = o.geometry;
+      const [keep, out] = Gym3D.split(g, (t) => { const b = P.box.get(P.tri[t]); return !(b && b[1] > 2.6 && b[4] - b[1] < 0.08); });
+      if (out.length) g.setIndex(new THREE.BufferAttribute(keep, 1));
+    }
+    const strips = [];
+    let led = null;
+    for (const o of plainOf('led_white')) {
+      led = led || o.material;
+      this.pieces(o, 2.2).box.forEach((b) => { if (b[4] - b[1] < 0.012 && Math.max(b[3] - b[0], b[5] - b[2]) > 0.5) strips.push(b); });
+    }
+    if (!strips.length) return;
+    for (const o of plainOf('matte_black')) {
+      const P = this.pieces(o, 2.2), hit = new Set();
+      P.box.forEach((b, r) => {
+        const cx = (b[0] + b[3]) / 2, cz = (b[2] + b[5]) / 2;
+        if (b[4] - b[1] > 0.09) return;
+        if (strips.some((s) => cx > s[0] - 0.03 && cx < s[3] + 0.03 && cz > s[2] - 0.03 && cz < s[5] + 0.03 && Math.abs(b[1] - s[4]) < 0.015)) hit.add(r);
+      });
+      if (!hit.size) continue;
+      const g = o.geometry, [keep, out] = Gym3D.split(g, (t) => !hit.has(P.tri[t]));
+      g.setIndex(new THREE.BufferAttribute(keep, 1));
+      const g2 = lodGeometry(g, out);
+      const m = new THREE.Mesh(g2, led);
+      m.name = 'led_bars'; m.matrixAutoUpdate = false; m.matrix.copy(o.matrixWorld); m.matrixWorld.copy(o.matrixWorld);
+      if (!g.boundingBox) g.computeBoundingBox();
+      g2.boundingBox = null; g2.boundingSphere = null; g2.computeBoundingSphere();
+      root.add(m);
     }
   }
   async prepareModel(root) {
+    this.cleanModel(root);
     await this.simplify(root);
     if (this.dead) return;
     root.updateMatrixWorld(true);
-    const lo = this.tier === 'lo';
+    const lo = this.light;
     const aniso = Math.min(this.renderer.capabilities.getMaxAnisotropy(), 4);
     const plain = [], inst = new Map(), seen = new Set();
     root.traverse((o) => {
@@ -660,14 +921,24 @@ export class Gym3D {
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(o);
     }
+    // detailed parts also get a coarser version for tiles far away (1.5-2 cm cells: a pixel or two beyond 10 m)
+    const farIdx = new Map();
     let t0 = performance.now();
+    for (const o of plain) {
+      const g = o.geometry, I = g.index;
+      if (!I || I.count < 3600 || farIdx.has(g)) continue;
+      const r = clusterIndex(I, positions(g), (lo ? 0.02 : 0.015) / (o.matrixWorld.getMaxScaleOnAxis() || 1));
+      farIdx.set(g, r.length < I.count * 0.8 ? r : null);
+      if (performance.now() - t0 > 12) { await this.tick(); t0 = performance.now(); }
+    }
     for (const list of groups.values()) {
-      const geo = buildMerged(list.map((o) => ({ geo: o.geometry, matrix: o.matrixWorld, mat: o.material })));
+      const geo = buildMerged(list.map((o) => ({ geo: o.geometry, matrix: o.matrixWorld, mat: o.material, far: farIdx.get(o.geometry) })));
       const m = new THREE.Mesh(geo, matFor(list[0].material.side));
       m.matrixAutoUpdate = false;
       out.add(m);
+      if (geo.userData.far) this.tiles.push({ mesh: m, near: geo, far: geo.userData.far, box: geo.boundingBox });
       list.forEach((o) => { o.parent.remove(o); o.geometry.dispose(); });
-      if (performance.now() - t0 > 12) { await nextFrame(); t0 = performance.now(); if (this.dead) return; }
+      if (performance.now() - t0 > 12) { await this.tick(); t0 = performance.now(); }
     }
     // instanced parts: the plain-coloured pieces of one instanced object become one instanced draw
     for (const list of inst.values()) {
@@ -686,7 +957,7 @@ export class Gym3D {
         parent.add(im);
         l.forEach((o) => { parent.remove(o); o.geometry.dispose(); });
       }
-      if (performance.now() - t0 > 12) { await nextFrame(); t0 = performance.now(); if (this.dead) return; }
+      if (performance.now() - t0 > 12) { await this.tick(); t0 = performance.now(); }
     }
     root.add(out);
     // materials nothing uses any more
@@ -705,7 +976,7 @@ export class Gym3D {
         c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
         if (img.close) img.close();
         t.image = c; t.needsUpdate = true;
-        if (performance.now() - t0 > 12) { await nextFrame(); t0 = performance.now(); if (this.dead) return; }
+        if (performance.now() - t0 > 12) { await this.tick(); t0 = performance.now(); }
       }
     }
     // phones: the cheaper standard shader for the remaining parts (no clear coat / sheen layers)
@@ -719,7 +990,97 @@ export class Gym3D {
         }
       });
     }
+    // the hanging LED strips: the glowing diffuser sits a hair under the black housing; let it win the depth test
+    // (in the photos they read as bright bars). Mirrors: the light photo is coarse (0.7° per pixel), so a perfectly
+    // sharp mirror only shows blur; a slightly satin finish makes that blur read as intended
+    root.traverse((o) => {
+      if (!o.isMesh) return;
+      (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => {
+        if (!m) return;
+        if (/^led_/.test(m.name)) { m.polygonOffset = true; m.polygonOffsetFactor = -2; m.polygonOffsetUnits = -8; }
+        if (m.name === 'mirror' && 'roughness' in m) { m.roughness = Math.max(m.roughness, 0.14); m.metalness = Math.min(m.metalness, 0.9); }
+      });
+    });
     root.updateMatrixWorld(true);
+    await this.prepareInstances(root);
+  }
+  // instanced parts are culled per copy (three.js culls an InstancedMesh as one sphere around all its copies, so a set
+  // spread over the gym would always be drawn in full); heavy ones also get a light version for copies far away
+  async prepareInstances(root) {
+    if (this.dead) return;
+    const list = [];
+    root.traverse((o) => { if (o.isInstancedMesh && o.count > 1) list.push(o); });
+    const m4 = new THREE.Matrix4(), v = new THREE.Vector3();
+    let t0 = performance.now();
+    for (const o of list) {
+      const n = o.count, geo = o.geometry;
+      if (!geo.boundingSphere) geo.computeBoundingSphere();
+      const bs = geo.boundingSphere, src = o.instanceMatrix.array.slice(0, n * 16);
+      const col = o.instanceColor ? o.instanceColor.array.slice(0, n * 3) : null;
+      const sph = new Float32Array(n * 4);
+      for (let i = 0; i < n; i++) {
+        m4.fromArray(src, i * 16).premultiply(o.matrixWorld);
+        v.copy(bs.center).applyMatrix4(m4);
+        sph[i * 4] = v.x; sph[i * 4 + 1] = v.y; sph[i * 4 + 2] = v.z; sph[i * 4 + 3] = bs.radius * m4.getMaxScaleOnAxis();
+      }
+      o.frustumCulled = false;
+      o.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      const set = { mesh: o, far: null, n, src, col, sph, sig: '' };
+      this.instSets.push(set);
+      const I = geo.index;
+      if (!I || I.count / 3 <= LOD_TRIS || geo.groups.length) continue;
+      // 1.2 cm cells in the world (the copies' own scale taken out)
+      const sc = bs.radius > 0 ? sph[3] / bs.radius : 1;
+      const r = clusterIndex(I, positions(geo), 0.012 / (sc || 1));
+      if (performance.now() - t0 > 12) { await this.tick(); t0 = performance.now(); }
+      if (!r.length || r.length > I.count * 0.6) continue;
+      const far = new THREE.InstancedMesh(lodGeometry(geo, geo.attributes.position.count > 65535 ? r : new Uint16Array(r)), o.material, n);
+      far.name = o.name + '_far';
+      far.frustumCulled = false; far.count = 0; far.visible = false;
+      far.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      if (col) far.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
+      far.matrixAutoUpdate = o.matrixAutoUpdate; far.matrix.copy(o.matrix); far.position.copy(o.position); far.quaternion.copy(o.quaternion); far.scale.copy(o.scale);
+      o.parent.add(far);
+      set.far = far;
+    }
+  }
+  // which copies of each instanced part are in view, and which of them are far; far tiles use their coarser version
+  // (after the camera moved)
+  cullInstances() {
+    const cam = this.camera;
+    cam.updateMatrixWorld();
+    for (const t of this.tiles) {
+      const g = t.box.distanceToPoint(cam.position) > TILE_LOD_D ? t.far : t.near;
+      if (t.mesh.geometry !== g) t.mesh.geometry = g;
+    }
+    if (!this.instSets.length) return;
+    _pm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+    _fr.setFromProjectionMatrix(_pm);
+    const px = cam.position.x, py = cam.position.y, pz = cam.position.z;
+    for (const s of this.instSets) {
+      const near = s.mesh, far = s.far, A = near.instanceMatrix.array, B = far && far.instanceMatrix.array;
+      let a = 0, b = 0, sig = '';
+      for (let i = 0; i < s.n; i++) {
+        _sp.center.set(s.sph[i * 4], s.sph[i * 4 + 1], s.sph[i * 4 + 2]); _sp.radius = s.sph[i * 4 + 3];
+        if (!_fr.intersectsSphere(_sp)) continue;
+        const isFar = !!B && Math.hypot(_sp.center.x - px, _sp.center.y - py, _sp.center.z - pz) - _sp.radius > LOD_D;
+        sig += (isFar ? 'f' : 'n') + i;
+        if (isFar) {
+          for (let k = 0; k < 16; k++) B[b * 16 + k] = s.src[i * 16 + k];
+          if (s.col) for (let k = 0; k < 3; k++) far.instanceColor.array[b * 3 + k] = s.col[i * 3 + k];
+          b++;
+        } else {
+          for (let k = 0; k < 16; k++) A[a * 16 + k] = s.src[i * 16 + k];
+          if (s.col) for (let k = 0; k < 3; k++) near.instanceColor.array[a * 3 + k] = s.col[i * 3 + k];
+          a++;
+        }
+      }
+      if (sig === s.sig) continue;
+      s.sig = sig;
+      near.count = a; near.visible = a > 0; near.instanceMatrix.needsUpdate = true;
+      if (s.col) near.instanceColor.needsUpdate = true;
+      if (far) { far.count = b; far.visible = b > 0; far.instanceMatrix.needsUpdate = true; if (s.col) far.instanceColor.needsUpdate = true; }
+    }
   }
 
   /* ---------- frame loop ---------- */
@@ -739,11 +1100,13 @@ export class Gym3D {
     const R = this.rendered;
     const moved = R.x !== this.x || R.z !== this.z || R.y !== eyeY || R.yaw !== this.yaw || R.pitch !== this.pitch || R.fov !== fov;
     if (!moved && !this.dirty) { this.drewLast = false; return; }
+    if (this.lost) return;
     cam.position.set(this.x, eyeY, this.z);
     cam.rotation.set(this.pitch, this.yaw, 0);
     if (cam.fov !== fov) { cam.fov = fov; cam.updateProjectionMatrix(); }
     R.x = this.x; R.z = this.z; R.y = eyeY; R.yaw = this.yaw; R.pitch = this.pitch; R.fov = fov;
     this.dirty = false;
+    this.cullInstances();
     this.renderer.render(this.scene, cam);
     this.adapt(now, this.drewLast);
     this.drewLast = true;
@@ -808,6 +1171,15 @@ export class Gym3D {
     const fy = this.platAt(this.x, this.z) ? (this.walkInfo.platform_h || 0.15) : 0;
     if (fy !== this.floorY) { this.floorY += (fy - this.floorY) * (1 - Math.exp(-dt * 9)); if (Math.abs(fy - this.floorY) < 0.001) this.floorY = fy; }
   }
+  // a sub-step to (nx, nz) is allowed when that cell is free and, crossing into a diagonal cell, both cells beside
+  // the corner are free too (the grid is already grown by the walker's radius: a corner gap is narrower than you)
+  canStep(nx, nz) {
+    if (!this.free(nx, nz)) return false;
+    const g = this.grid;
+    const i0 = Math.floor((this.x - g.x0) / g.res), i1 = Math.floor((nx - g.x0) / g.res);
+    const j0 = Math.floor((this.z + g.y1) / g.res), j1 = Math.floor((nz + g.y1) / g.res);
+    return i0 === i1 || j0 === j1 || (this.free(nx, this.z) && this.free(this.x, nz));
+  }
   // collide against the grid in small sub-steps: slide along walls and round corners (a rounded machine footprint
   // or a turnstile post guides you past it instead of stopping you dead); a wall met head-on stops you
   move(dx, dz) {
@@ -815,7 +1187,7 @@ export class Gym3D {
     const sx = dx / n, sz = dz / n;
     let hitX = false, hitZ = false;
     for (let i = 0; i < n; i++) {
-      if (this.free(this.x + sx, this.z + sz)) { this.x += sx; this.z += sz; continue; }
+      if (this.canStep(this.x + sx, this.z + sz)) { this.x += sx; this.z += sz; continue; }
       if (sx && this.free(this.x + sx, this.z)) { this.x += sx; hitZ = true; continue; }
       if (sz && this.free(this.x, this.z + sz)) { this.z += sz; hitX = true; continue; }
       if (!this.deflect(sx, sz)) { hitX = hitZ = true; break; }
@@ -831,7 +1203,7 @@ export class Gym3D {
       for (const sg of [pref, -pref]) {
         const c = Math.cos(a * sg), s = Math.sin(a * sg), k = Math.cos(a);
         const rx = (ux * c - uz * s), rz = (ux * s + uz * c);
-        if (!this.free(this.x + rx * L * k, this.z + rz * L * k) || !this.free(this.x + rx * 0.3, this.z + rz * 0.3)) continue;
+        if (!this.canStep(this.x + rx * L * k, this.z + rz * L * k) || !this.free(this.x + rx * 0.3, this.z + rz * 0.3)) continue;
         this.x += rx * L * k; this.z += rz * L * k; this.defSide = sg;
         return true;
       }
@@ -844,7 +1216,7 @@ export class Gym3D {
         if (!this.free(ox + ux * 0.06, oz + uz * 0.06)) continue;
         let clear = true;
         for (let t = 0.025; t <= off; t += 0.025) if (!this.free(this.x + px * t, this.z + pz * t)) { clear = false; break; }
-        if (!clear) continue;
+        if (!clear || !this.canStep(this.x + px * Math.min(L, off), this.z + pz * Math.min(L, off))) continue;
         this.x += px * Math.min(L, off); this.z += pz * Math.min(L, off); this.defSide = sg;
         return true;
       }
@@ -989,11 +1361,13 @@ export class Gym3D {
     const pts = new Map();
     let drag = null, pinch = null;
     cv.addEventListener('pointerdown', (e) => {
+      // skipTap (set by the page in the capture phase): this press closes something over the view, it is not a walk
+      const skip = this.skipTap; this.skipTap = false;
       cv.focus({ preventScroll: true });
       if (e.pointerType === 'mouse' && e.button !== 0) return;
       pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
       try { cv.setPointerCapture(e.pointerId); } catch (err) { /* already released */ }
-      if (pts.size === 1) drag = { id: e.pointerId, x: e.clientX, y: e.clientY, yaw: this.yaw, pitch: this.pitch, moved: false, t: performance.now() };
+      if (pts.size === 1) drag = { id: e.pointerId, x: e.clientX, y: e.clientY, yaw: this.yaw, pitch: this.pitch, moved: false, t: performance.now(), skip };
       else if (pts.size === 2) {
         const [a, b] = [...pts.values()];
         pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, zoom: this.zoom };
@@ -1026,7 +1400,7 @@ export class Gym3D {
       pts.delete(e.pointerId);
       if (pts.size < 2) pinch = null;
       if (!was || !drag || e.pointerId !== drag.id) { if (!pts.size) drag = null; return; }
-      if (!drag.moved && performance.now() - drag.t < 600 && e.type === 'pointerup') this.tapAt(e);
+      if (!drag.moved && !drag.skip && performance.now() - drag.t < 600 && e.type === 'pointerup') this.tapAt(e);
       drag = null;
     };
     cv.addEventListener('pointerup', up);
@@ -1137,23 +1511,37 @@ export class Gym3D {
     if (instant || REDUCE) { go(); return; }
     this.fade = { out: true, then: go };
   }
-  // stop drawing while hidden (battery); carry on where it was when shown again
+  // stop drawing while hidden (battery) and stop loading (phones: downloads too); carry on where it was when shown
   pause() {
     if (this.raf) cancelAnimationFrame(this.raf);
     this.raf = 0;
+    this.open = false;
+    if (this.ac && this.light) this.ac.abort();
     this.keys.clear();
-    this.setGoal(null);
+    if (this.ready) this.setGoal(null);
     this.vx = this.vz = 0; this.turnVel = 0;
+    // once the overlay has closed, give back the drawing buffer (tens of MB with multisampling)
+    clearTimeout(this.shrinkT);
+    this.shrinkT = setTimeout(() => { if (!this.open && !this.dead) { this.renderer.setSize(1, 1, false); this.shrunk = true; } }, 1500);
   }
   // (also when already running: draws the next frame, e.g. so the minimap shows straight away)
   resume() {
     this.dirty = true;
-    if (this.raf || this.dead) return;
+    if (this.dead) return;
+    clearTimeout(this.shrinkT);
+    if (!this.open) {
+      this.open = true;
+      const w = this.waiters; this.waiters = [];
+      w.forEach((f) => f());
+    }
+    if (this.shrunk) { this.shrunk = false; this.resize(); }
+    if (this.raf) return;
     this.last = performance.now();
     this.raf = requestAnimationFrame(this._frame);
   }
   focus() { this.canvas.focus({ preventScroll: true }); }
   resize() {
+    if (this.shrunk) return;
     const w = this.root.clientWidth || 1, h = this.root.clientHeight || 1;
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
@@ -1165,11 +1553,17 @@ export class Gym3D {
     return { tier: this.tier, pr: this.pr, calls: i.render.calls, tris: i.render.triangles, geometries: i.memory.geometries, textures: i.memory.textures, x: +this.x.toFixed(2), z: +this.z.toFixed(2), yaw: +this.yaw.toFixed(3), env: this.envCur && this.envCur.id, model: !!this.model };
   }
   destroy() {
+    if (this.dead) return;
     this.dead = true;
     cancelAnimationFrame(this.raf); this.raf = 0;
+    clearTimeout(this.shrinkT);
+    if (this.ac) this.ac.abort();
+    const w = this.waiters; this.waiters = []; w.forEach((f) => f());   // pending loads see `dead` and stop
     if (this.ro) this.ro.disconnect();
-    const seen = new Set();
-    const free = (x) => { if (x && !seen.has(x)) { seen.add(x); x.dispose(); } };
+    // after a lost-and-restored context some GPU objects belong to the old context: losing the whole context below frees
+    // everything without the browser warning about each one
+    const seen = new Set(), gpu = !this.restored && !this.lost;
+    const free = (x) => { if (gpu && x && !seen.has(x)) { seen.add(x); x.dispose(); } };
     this.scene.traverse((o) => {
       if (o.geometry) free(o.geometry);
       (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => {
@@ -1179,12 +1573,23 @@ export class Gym3D {
         free(m);
       });
     });
-    if (this.envCache) this.envCache.forEach((e) => e.tex && e.tex.dispose());
-    [this.envRT, this.blendRT, this.pmrem, this.blendMat, this.ktx2].forEach((x) => x && x.dispose && x.dispose());
-    if (this.blendScene) this.blendScene.traverse((o) => o.geometry && o.geometry.dispose());
+    this.tiles.forEach((t) => { free(t.near); free(t.far); });
+    this.instSets.forEach((s) => s.far && free(s.far.geometry));
+    if (this.envCache) this.envCache.forEach((e) => free(e.tex));
+    [this.envRT, this.blendRT, this.pmrem, this.blendMat].forEach(free);
+    if (this.ktx2) this.ktx2.dispose();
+    if (this.blendScene) this.blendScene.traverse((o) => free(o.geometry));
+    this.canvas.removeEventListener('webglcontextlost', this.onLost);
+    this.canvas.removeEventListener('webglcontextrestored', this.onRestored);
     this.renderer.dispose();
+    // let the browser free the context now, not whenever the garbage collector gets to it
+    try { this.renderer.forceContextLoss(); } catch (e) { /* already lost */ }
     this.canvas.remove();
     if (DEBUG && window.__g3 === this) window.__g3 = null;
+    // drop the big CPU-side data (geometry and texture copies, the walk grid, the light photos)
+    this.scene = this.model = this.skins = this.atlases = this.grid = this.astar = this.envCache = null;
+    this.envRT = this.blendRT = this.pmrem = this.blendScene = this.ktx2 = this.places = null;
+    this.instSets = []; this.tiles = []; this.st.map = null; this.opts = {};
   }
 }
 

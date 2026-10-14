@@ -482,6 +482,7 @@
       tourBack = document.activeElement;
       loadWalker();
       if (wk) wk.resume();
+      document.dispatchEvent(new CustomEvent('da:tour-open'));   // the 3D salon frees its viewer on phones
       tour.removeAttribute('inert');
       tour.setAttribute('aria-hidden', 'false');
       tour.classList.add('open');
@@ -561,24 +562,35 @@
   const s3Go = s3 ? $('.tour-go', s3) : null, s3Fs = s3 ? $('.tour-fs', s3) : null;
   const s3PlBtn = s3 ? $('.s3d-pl-btn', s3) : null, s3PlList = s3 ? $('.s3d-pl-list', s3) : null;
   let s3Open = false, s3Ready = false, s3Live = false, s3Back = null, s3Pushed = false, s3Place = '';
-  let gv = null, gvLoading = null;
-  const S3_V = '1';
+  let gv = null, gvLoading = null, s3Pos = null, s3DropT = 0;
+  const S3_V = '2', S3_DATA = '1';   // the viewer module / the model data (cache busting)
   function loadGym() {
     if (gvLoading) return gvLoading;
     const pc = $('.s3d-pc', s3), mpc = $('.s3d-mpc', s3);
+    // the start card's backdrop: only now (an image in a hidden fixed overlay would load with the page)
+    const bg = $('.tour-start>img[data-src]', s3);
+    if (bg && !bg.getAttribute('src')) bg.src = bg.dataset.src;
+    if (pc) pc.textContent = '%0';
     // the three.js add-ons need import maps (Safari 16.4+); older browsers get the 360° tour link instead
     const maps = !!(window.HTMLScriptElement && HTMLScriptElement.supports && HTMLScriptElement.supports('importmap'));
-    gvLoading = (maps ? import('./model/gym3d.js?v=' + S3_V) : Promise.reject(new Error('import maps')))
+    let me = null;
+    const p = gvLoading = (maps ? import('./model/gym3d.js?v=' + S3_V) : Promise.reject(new Error('import maps')))
       .then(({ Gym3D, drawMap }) => {
+        if (gvLoading !== p) return null;
         const map = $('.tour-map', s3), mctx = map.getContext('2d');
-        gv = new Gym3D(s3Stage, {
-          onProgress: (p) => { if (pc) pc.textContent = '%' + Math.round(p * 100); },
-          onModel: (p) => {
-            s3.classList.toggle('s3d-loading', p < 1);
-            if (mpc) mpc.textContent = '%' + Math.round(p * 100);
+        me = gv = new Gym3D(s3Stage, {
+          // out of the Tab order until the walk starts (keys must not move the view behind the start card)
+          tabIndex: s3Live ? 0 : -1,
+          start: s3Pos,
+          onProgress: (q) => { if (pc && gv === me) pc.textContent = '%' + Math.round(q * 100); },
+          onModel: (q) => {
+            if (gv !== me) return;
+            s3.classList.toggle('s3d-loading', q < 1);
+            if (mpc) mpc.textContent = '%' + Math.round(q * 100);
           },
           onFrame: (st) => {
-            if (!s3Live) return;
+            if (!s3Live || gv !== me) return;
+            s3Pos = { x: st.x, z: st.z, yaw: st.yaw };
             drawMap(mctx, map.width / 200, st);
             if (st.place !== s3Place) s3SetPlace(st.place);
           },
@@ -586,19 +598,39 @@
         gv.canvas.addEventListener('focus', s3Sync);
         gv.canvas.addEventListener('blur', () => setTimeout(s3Sync, 0));
         if (!s3Open) gv.pause();
-        return gv.load('model/?v=' + S3_V);
+        return gv.load('model/?v=' + S3_DATA).then(() => true);
       })
-      .then(() => {
+      .then((ok) => {
+        if (!ok || gv !== me) return;
         s3Ready = true;
         s3.classList.add('ready');
         if (s3Go) { s3Go.disabled = false; if (s3Open && !s3Live) s3Go.focus({ preventScroll: true }); }
       })
       .catch((err) => {
+        if (gvLoading !== p || (me && me !== gv)) return;    // a viewer that was let go of meanwhile
         s3.classList.add('fail');
         if (window.console) console.warn('3D salon:', err && err.message ? err.message : err);
       });
     return gvLoading;
   }
+  // let go of the viewer (its WebGL context, ~150 MB of GPU memory on a phone, and its data); the next open builds a new
+  // one from the HTTP cache and starts where the walker was
+  function s3Drop() {
+    clearTimeout(s3DropT);
+    if (!gv || s3Open) return;
+    gv.destroy();
+    gv = null; gvLoading = null; s3Ready = false; s3Live = false;
+    s3.classList.remove('ready', 'live', 'fail', 's3d-loading', 'away');
+    if (s3Go) s3Go.disabled = true;
+  }
+  // phones and low-memory devices: drop the viewer a while after it was closed
+  const s3Light = () => !!gv && (gv.tier === 'lo' || isTouch);
+  // the 360° tour opens: one WebGL context at a time on phones (after the closing animation)
+  document.addEventListener('da:tour-open', () => {
+    if (!gv || s3Open || !s3Light()) return;
+    clearTimeout(s3DropT);
+    s3DropT = setTimeout(s3Drop, 1000);
+  });
   function s3SetPlace(id) {
     s3Place = id || '';
     const b = s3PlList && $('[data-place="' + s3Place + '"]', s3PlList);
@@ -608,8 +640,10 @@
   function s3Sync() {
     if (s3) s3.classList.toggle('away', s3Open && s3Live && !!gv && document.activeElement !== gv.canvas && !s3Menu());
   }
+  const s3Cred = s3 ? $('.s3d-cred', s3) : null;
   function s3Focus() {
     if (!gv || !s3Live || !s3Open) return;
+    if (s3Cred) s3Cred.open = false;     // back to walking: the credits panel would sit over the view
     gv.focus();
     setTimeout(s3Sync, 0);
   }
@@ -617,7 +651,7 @@
     if (!s3Ready || s3Live) return;
     s3Live = true;
     s3.classList.add('live');
-    if (gv) gv.resume();     // draws a frame now, so the minimap and the place name show at once
+    if (gv) { gv.canvas.tabIndex = 0; gv.resume(); }    // draws a frame now, so the minimap and the place name show at once
     s3Focus();
   }
   const s3Menu = () => !!s3PlList && !s3PlList.hidden;
@@ -625,6 +659,7 @@
     if (!s3PlList || s3Menu() === open) return;
     s3PlList.hidden = !open;
     s3PlBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open && s3Cred) s3Cred.open = false;
     if (open && focusFirst) { const b = $('[aria-current="true"]', s3PlList) || $('button', s3PlList); if (b) b.focus({ preventScroll: true }); }
     s3Sync();
   }
@@ -636,6 +671,7 @@
       s3Back = document.activeElement;
       // a link in the (now closing) burger menu hands focus back to the burger
       if (!s3Back || s3Back === document.body || (s3Back.closest && s3Back.closest('.menu'))) s3Back = $('.burger');
+      clearTimeout(s3DropT);
       loadGym();
       if (gv) gv.resume();
       s3.removeAttribute('inert');
@@ -653,7 +689,10 @@
     } else {
       if (document.fullscreenElement === s3 && document.exitFullscreen) document.exitFullscreen().catch(() => {});
       s3SetMenu(false);
-      if (gv) gv.pause();
+      if (gv) gv.pause();       // stops drawing and loading (nothing runs behind the page)
+      // phones: let go of the viewer when handing over to the 360° tour (one WebGL context at a time), else after a while
+      clearTimeout(s3DropT);
+      if (s3Light()) s3DropT = setTimeout(s3Drop, swap ? 1100 : 45000);
       s3.classList.remove('open');
       s3.setAttribute('aria-hidden', 'true');
       s3.setAttribute('inert', '');
@@ -697,6 +736,14 @@
     });
     if (s3PlBtn) {
       s3PlBtn.addEventListener('click', (e) => s3SetMenu(!s3Menu(), e.detail === 0));
+      // menu button: ↓ / ↑ open the list on the current (or the first / last) place
+      s3PlBtn.addEventListener('keydown', (e) => {
+        if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+        e.preventDefault(); e.stopPropagation();
+        s3SetMenu(true);
+        const bs = $$('button', s3PlList);
+        (bs.find((x) => x.getAttribute('aria-current') === 'true') || (e.key === 'ArrowDown' ? bs[0] : bs[bs.length - 1])).focus({ preventScroll: true });
+      });
       $$('button', s3PlList).forEach((b) => b.addEventListener('click', () => {
         s3SetMenu(false);
         if (gv && s3Live && gv.teleport(b.dataset.place)) s3SetPlace(b.dataset.place);
@@ -710,8 +757,14 @@
         bs[(i + (e.key === 'ArrowDown' ? 1 : bs.length - 1)) % bs.length].focus({ preventScroll: true });
       });
       s3.addEventListener('focusout', (e) => { if (s3Menu() && e.relatedTarget && !e.relatedTarget.closest('.s3d-places')) s3SetMenu(false); });
-      s3.addEventListener('pointerdown', (e) => { if (s3Menu() && !e.target.closest('.s3d-places')) s3SetMenu(false); });
     }
+    // a tap on the view while the places list or the credits are open only closes them (it does not walk there too)
+    s3.addEventListener('pointerdown', (e) => {
+      let used = false;
+      if (s3Menu() && !e.target.closest('.s3d-places')) { s3SetMenu(false); used = true; }
+      if (s3Cred && s3Cred.open && !e.target.closest('.s3d-cred')) { s3Cred.open = false; used = true; }
+      if (used && gv && e.target === gv.canvas) gv.skipTap = true;
+    }, true);   // capture: before the viewer takes focus (which would close the list first) and reads the tap
     if (s3Fs) {
       if (!document.fullscreenEnabled || !s3.requestFullscreen) s3Fs.hidden = true;
       s3Fs.addEventListener('click', () => {
@@ -734,6 +787,7 @@
       if (!walkKey(e.key) || e.ctrlKey || e.metaKey || e.altKey) return;
       if (gv && document.activeElement === gv.canvas) return;   // the viewer handles it
       if (s3Menu() && /^Arrow(Up|Down)$/.test(e.key)) return;   // moving through the places list
+      if (document.activeElement === s3PlBtn && /^Arrow(Up|Down)$/.test(e.key)) return;   // opens the list
       e.preventDefault();
       if (!s3Live) { s3Start(); return; }
       s3SetMenu(false);

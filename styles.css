@@ -268,13 +268,14 @@ a:hover .roll>span,button:hover .roll>span{transform:translateY(-50%)}
 .eq b{width:3px;height:100%;background:#111111;transform-origin:center;animation:eqb 1s ease-in-out infinite}
 .eq b:nth-child(2){animation-delay:.15s}.eq b:nth-child(3){animation-delay:.3s}.eq b:nth-child(4){animation-delay:.45s}.eq b:nth-child(5){animation-delay:.6s}
 @keyframes eqb{0%,100%{transform:scaleY(.3)}50%{transform:scaleY(1)}}
-.menu{position:fixed;inset:0;z-index:90;background:#111111;clip-path:inset(100% 0 0 0);transition:clip-path .95s cubic-bezier(.87,0,.13,1);pointer-events:none;display:flex;align-items:center;justify-content:center}
+.menu{position:fixed;inset:0;z-index:90;background:#111111;clip-path:inset(100% 0 0 0);transition:clip-path .95s cubic-bezier(.87,0,.13,1);pointer-events:none;display:flex;align-items:safe center;justify-content:center;overflow-y:auto;overscroll-behavior:contain;padding:20px 0 104px}
 .menu.open{clip-path:inset(0 0 0 0);pointer-events:auto}
-.mi{display:flex;align-items:baseline;gap:18px;color:#ffffff;text-decoration:none;font-size:68px;font-weight:800;line-height:1.05;text-transform:uppercase;letter-spacing:-.01em;transform:perspective(900px) rotateX(-95deg);transform-origin:50% 100%;opacity:0;transition:transform .9s cubic-bezier(.19,1,.22,1),opacity .5s,color .3s}
+.mi{display:flex;align-items:baseline;gap:18px;color:#ffffff;text-decoration:none;font-size:clamp(28px,calc((100vh - 180px) / 9.7),68px);font-weight:800;line-height:1.05;text-transform:uppercase;letter-spacing:-.01em;transform:perspective(900px) rotateX(-95deg);transform-origin:50% 100%;opacity:0;transition:transform .9s cubic-bezier(.19,1,.22,1),opacity .5s,color .3s}
 .menu.open .mi{transform:none;opacity:1}
 .mi:hover{color:var(--lime)}
 .mi-n{font-size:14px;font-weight:600;letter-spacing:.2em;color:var(--lime)}
-@media (max-width:600px){.rb-track{font-size:150px}.mi{font-size:40px}}
+@media (max-width:600px){.rb-track{font-size:150px}.mi{font-size:clamp(26px,calc((100vh - 180px) / 9.7),40px)}}
+.sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 
 
 /* =========================================================
@@ -481,7 +482,7 @@ html.tour-on{overflow:hidden}
 .s3d-pl-btn[aria-expanded="true"] .s3d-chev{transform:rotate(180deg)}
 .s3d-pl-btn:hover,.s3d-pl-btn:focus-visible{background:var(--lime);border-color:var(--lime);color:#111111;outline:none}
 .s3d-pl-btn:hover>svg:first-child,.s3d-pl-btn:focus-visible>svg:first-child{color:#111111}
-.s3d-pl-list{position:absolute;left:0;top:52px;min-width:232px;margin:0;padding:6px;list-style:none;background:rgba(14,14,14,.95);border:1px solid #2a2a2a;border-radius:14px;box-shadow:0 24px 50px -18px rgba(0,0,0,.8)}
+.s3d-pl-list{position:absolute;left:0;top:52px;min-width:232px;margin:0;padding:6px;list-style:none;background:#0e0e0e;border:1px solid #2a2a2a;border-radius:14px;box-shadow:0 24px 50px -18px rgba(0,0,0,.8)}
 .s3d-pl-list[hidden]{display:none}
 .s3d-pl-list button{display:flex;align-items:center;gap:10px;width:100%;padding:11px 12px;border:0;border-radius:9px;background:transparent;color:#E6E6E6;font-family:inherit;font-size:15px;font-weight:500;text-align:left;cursor:pointer;transition:background .2s,color .2s}
 .s3d-pl-list button::before{content:"";flex:0 0 auto;width:7px;height:7px;border-radius:50%;background:#4a4a4a}
@@ -508,7 +509,8 @@ html.tour-on{overflow:hidden}
   .s3d-pl-btn{height:40px;font-size:12px;max-width:calc(100vw - 160px)}
   .s3d-model{top:auto;bottom:168px}
   .s3d-cred{left:10px;top:58px;bottom:auto}
-  .s3d-cred-in{bottom:auto;top:calc(100% + 8px)}
+  /* left of the minimap (124px + 10px margin + a gap), so the walker's dot on it stays visible */
+  .s3d-cred-in{bottom:auto;top:calc(100% + 8px);width:min(380px,calc(100vw - 164px));max-height:calc(100vh - 260px);overflow-y:auto}
 }
 @media (max-width:600px){.s3d-pl-list{min-width:210px}.s3d-pl-list button{padding:10px 12px;font-size:14px}.s3d .tour-eyebrow{font-size:12px;letter-spacing:.16em}}
 
